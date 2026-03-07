@@ -1,0 +1,15 @@
+{
+  "hosting": {
+    "site": "lofawelfare-3ae73",
+    "source": ".",
+    "frameworksBackend": {
+      "region": "us-central1"
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  }
+}

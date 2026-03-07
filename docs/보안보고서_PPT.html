@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LOFA 복지시스템 보안 보고서</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Malgun Gothic', '맑은 고딕', sans-serif; background: #1a1a2e; }
+
+  .slide {
+    width: 960px;
+    min-height: 540px;
+    margin: 20px auto;
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    page-break-after: always;
+  }
+
+  /* Slide 1 - Title */
+  .slide-1 {
+    background: linear-gradient(135deg, #1a56db 0%, #0f3460 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    text-align: center;
+    padding: 60px;
+  }
+  .slide-1 .badge {
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 20px;
+    padding: 8px 20px;
+    font-size: 14px;
+    margin-bottom: 24px;
+    letter-spacing: 2px;
+  }
+  .slide-1 h1 { font-size: 42px; font-weight: 700; margin-bottom: 16px; line-height: 1.3; }
+  .slide-1 p { font-size: 18px; opacity: 0.85; margin-bottom: 8px; }
+  .slide-1 .sub { font-size: 14px; opacity: 0.6; margin-top: 32px; }
+
+  /* Common slide */
+  .slide-content {
+    background: white;
+    padding: 50px 60px;
+    min-height: 540px;
+    display: flex;
+    flex-direction: column;
+  }
+  .slide-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 36px;
+    padding-bottom: 20px;
+    border-bottom: 3px solid #1a56db;
+  }
+  .slide-num {
+    background: #1a56db;
+    color: white;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  .slide-title { font-size: 26px; font-weight: 700; color: #111827; }
+  .slide-subtitle { font-size: 14px; color: #6b7280; margin-top: 4px; }
+
+  /* Content styles */
+  .icon-card {
+    background: linear-gradient(135deg, #eff6ff, #dbeafe);
+    border: 2px solid #bfdbfe;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .icon-card .icon { font-size: 32px; flex-shrink: 0; }
+  .icon-card h3 { font-size: 16px; font-weight: 700; color: #1e40af; margin-bottom: 6px; }
+  .icon-card p { font-size: 14px; color: #374151; line-height: 1.6; }
+
+  .highlight-box {
+    background: #f0fdf4;
+    border: 2px solid #86efac;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+  }
+  .highlight-box h3 { color: #065f46; font-size: 15px; margin-bottom: 8px; }
+  .highlight-box p { color: #374151; font-size: 14px; line-height: 1.6; }
+
+  .warn-box {
+    background: #fff7ed;
+    border: 2px solid #fdba74;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { background: #1a56db; color: white; padding: 12px 16px; text-align: left; }
+  td { padding: 11px 16px; border-bottom: 1px solid #e5e7eb; color: #374151; }
+  tr:nth-child(even) td { background: #f9fafb; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+  .stat-card {
+    background: white;
+    border: 2px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+  }
+  .stat-card .num { font-size: 36px; font-weight: 700; color: #1a56db; }
+  .stat-card .label { font-size: 13px; color: #6b7280; margin-top: 4px; }
+
+  .check-list { list-style: none; padding: 0; }
+  .check-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 0;
+    font-size: 15px;
+    color: #374151;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .check-list li::before { content: '✅'; flex-shrink: 0; }
+  .check-list li.warn::before { content: '⚠️'; }
+
+  .footer { margin-top: auto; padding-top: 20px; display: flex; justify-content: space-between; align-items: center; }
+  .footer-logo { font-size: 13px; color: #9ca3af; }
+  .footer-page { font-size: 13px; color: #9ca3af; }
+
+  /* Slide 8 - conclusion */
+  .slide-conclusion {
+    background: linear-gradient(135deg, #065f46 0%, #0f3460 100%);
+    color: white;
+    padding: 60px;
+    min-height: 540px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  .slide-conclusion h2 { font-size: 36px; font-weight: 700; margin-bottom: 20px; }
+  .slide-conclusion p { font-size: 18px; opacity: 0.9; line-height: 1.7; max-width: 700px; }
+  .conclusion-badge {
+    display: inline-block;
+    background: rgba(255,255,255,0.2);
+    border: 2px solid rgba(255,255,255,0.4);
+    border-radius: 12px;
+    padding: 16px 32px;
+    font-size: 22px;
+    font-weight: 700;
+    margin: 28px 0;
+  }
+
+  @media print {
+    .slide { margin: 0; border-radius: 0; box-shadow: none; }
+    body { background: white; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Slide 1: Title -->
+<div class="slide slide-1">
+  <div class="badge">🔒 보안 검토 보고서</div>
+  <h1>한국지방재정공제회<br>복지신청 시스템 보안</h1>
+  <p>정보화팀 보안 검토 대응 자료</p>
+  <p style="opacity:0.7; font-size:15px;">Firebase 기반 웹 시스템</p>
+  <div class="sub">2026년 3월 | 총 8슬라이드</div>
+</div>
+
+<!-- Slide 2: 시스템 개요 -->
+<div class="slide">
+  <div class="slide-content">
+    <div class="slide-header">
+      <div class="slide-num">1</div>
+      <div>
+        <div class="slide-title">시스템이 뭐예요? 쉽게 설명해주세요</div>
+        <div class="slide-subtitle">시스템 개요</div>
+      </div>
+    </div>
+
+    <div class="icon-card">
+      <div class="icon">🏛️</div>
+      <div>
+        <h3>복지신청 웹 시스템</h3>
+        <p>직원들이 복지 혜택(경조사비, 의료비 등)을 온라인으로 신청하고, 관리자가 승인/반려하는 시스템입니다.</p>
+      </div>
+    </div>
+
+    <div style="margin: 20px 0; text-align: center; font-size: 15px; color: #6b7280;">쉬운 비유</div>
+
+    <div class="grid-2">
+      <div class="icon-card">
+        <div class="icon">📋</div>
+        <div>
+          <h3>이전 방식</h3>
+          <p>종이 신청서 → 직접 제출 → 담당자 처리</p>
+        </div>
+      </div>
+      <div class="icon-card">
+        <div class="icon">💻</div>
+        <div>
+          <h3>새 시스템</h3>
+          <p>웹 브라우저 → 온라인 신청 → 자동 처리</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span class="footer-logo">한국지방재정공제회 복지시스템</span>
+      <span class="footer-page">1 / 6</span>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 3: 데이터 저장 -->
+<div class="slide">
+  <div class="slide-content">
+    <div class="slide-header">
+      <div class="slide-num">2</div>
+      <div>
+        <div class="slide-title">데이터는 어디에 저장되나요?</div>
+        <div class="slide-subtitle">Google Firebase (서울 데이터센터)</div>
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-bottom: 20px;">
+      <div class="stat-card">
+        <div class="num">🇰🇷</div>
+        <div class="label">서울 리전<br>국내 데이터 저장</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">99.99%</div>
+        <div class="label">Google SLA<br>가용성 보장</div>
+      </div>
+    </div>
+
+    <table>
+      <tr><th>항목</th><th>내용</th></tr>
+      <tr><td>서비스명</td><td>Google Firebase (Firestore)</td></tr>
+      <tr><td>운영사</td><td>Google LLC</td></tr>
+      <tr><td>데이터 위치</td><td>🇰🇷 서울 (asia-northeast3)</td></tr>
+      <tr><td>보안 인증</td><td>ISO 27001, SOC 2/3 취득</td></tr>
+    </table>
+
+    <div style="margin-top: 16px;" class="highlight-box">
+      <h3>📦 쉬운 비유</h3>
+      <p>구글 드라이브처럼, 데이터가 구글의 초대형 금고(서울 데이터센터)에 저장됩니다. 구글이 24시간 365일 보안을 관리합니다.</p>
+    </div>
+
+    <div class="footer">
+      <span class="footer-logo">한국지방재정공제회 복지시스템</span>
+      <span class="footer-page">2 / 6</span>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 4: 인증 및 접근제어 -->
+<div class="slide">
+  <div class="slide-content">
+    <div class="slide-header">
+      <div class="slide-num">3</div>
+      <div>
+        <div class="slide-title">아무나 들어올 수 있나요?</div>
+        <div class="slide-subtitle">인증(로그인) 및 접근 제어</div>
+      </div>
+    </div>
+
+    <div class="grid-3" style="margin-bottom: 20px;">
+      <div class="icon-card" style="flex-direction: column; align-items: center; text-align: center;">
+        <div class="icon">🔑</div>
+        <h3>사번 + 비밀번호</h3>
+        <p style="font-size:13px;">인증된 직원만 접속</p>
+      </div>
+      <div class="icon-card" style="flex-direction: column; align-items: center; text-align: center;">
+        <div class="icon">🚪</div>
+        <h3>본인 데이터만</h3>
+        <p style="font-size:13px;">타인 신청서 열람 불가</p>
+      </div>
+      <div class="icon-card" style="flex-direction: column; align-items: center; text-align: center;">
+        <div class="icon">👮</div>
+        <h3>관리자 권한 분리</h3>
+        <p style="font-size:13px;">전체 열람은 관리자만</p>
+      </div>
+    </div>
+
+    <table>
+      <tr><th>사용자 유형</th><th>할 수 있는 것</th><th>할 수 없는 것</th></tr>
+      <tr><td>미로그인</td><td>로그인 페이지만 접근</td><td>모든 데이터</td></tr>
+      <tr><td>일반 직원</td><td>본인 신청·조회</td><td>타인 신청서</td></tr>
+      <tr><td>관리자</td><td>전체 관리·승인·삭제</td><td>-</td></tr>
+    </table>
+
+    <div class="footer">
+      <span class="footer-logo">한국지방재정공제회 복지시스템</span>
+      <span class="footer-page">3 / 6</span>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 5: 암호화 및 전송 보안 -->
+<div class="slide">
+  <div class="slide-content">
+    <div class="slide-header">
+      <div class="slide-num">4</div>
+      <div>
+        <div class="slide-title">데이터가 도중에 새지 않나요?</div>
+        <div class="slide-subtitle">전송 암호화 및 저장 보안</div>
+      </div>
+    </div>
+
+    <ul class="check-list" style="margin-bottom: 24px;">
+      <li>모든 통신은 HTTPS (TLS 1.3)로 암호화 — 도청 불가</li>
+      <li>비밀번호는 암호화 저장 — 관리자도 평문 확인 불가</li>
+      <li>Firebase가 SSL 인증서 자동 관리 — 만료 걱정 없음</li>
+      <li>HTTP 접속 시 자동으로 HTTPS로 전환</li>
+      <li>서울 리전에 데이터 저장 — 해외 반출 없음</li>
+    </ul>
+
+    <div class="highlight-box">
+      <h3>🔒 쉬운 비유</h3>
+      <p>일반 편지 대신 봉인된 특수 봉투(HTTPS)를 사용합니다. 중간에 누가 가로채도 내용을 읽을 수 없습니다. 마치 금고차가 현금을 나르는 것처럼, 데이터도 암호화된 경로로만 이동합니다.</p>
+    </div>
+
+    <div class="footer">
+      <span class="footer-logo">한국지방재정공제회 복지시스템</span>
+      <span class="footer-page">4 / 6</span>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 6: 관리자 비밀번호 초기화 -->
+<div class="slide">
+  <div class="slide-content">
+    <div class="slide-header">
+      <div class="slide-num">5</div>
+      <div>
+        <div class="slide-title">관리자가 비밀번호를 바꿀 수 있어요 — 문제없나요?</div>
+        <div class="slide-subtitle">관리자 비밀번호 초기화 기능 보안 검토</div>
+      </div>
+    </div>
+
+    <div class="highlight-box" style="margin-bottom: 16px;">
+      <h3>✅ 결론: 보안상 문제없음</h3>
+      <p>대부분의 기업 IT 시스템에서 운영 중인 표준 관리자 기능입니다.</p>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <table>
+          <tr><th colspan="2">보안 요소</th></tr>
+          <tr><td>처리 위치</td><td>서버 전용 (클라이언트 노출 없음)</td></tr>
+          <tr><td>사용 권한</td><td>관리자 계정만 가능</td></tr>
+          <tr><td>평문 노출</td><td>없음 (API 방식 처리)</td></tr>
+          <tr><td>감사 로그</td><td>Firebase Console 확인 가능</td></tr>
+        </table>
+      </div>
+      <div class="icon-card" style="flex-direction: column;">
+        <div class="icon">🏢</div>
+        <h3>실제 사례 비교</h3>
+        <p style="font-size:13px;">IT팀이 직원 윈도우 비밀번호를 초기화해주는 것과 동일한 방식입니다. 비밀번호를 "아는" 게 아니라 "새 비밀번호로 교체"하는 기능입니다.</p>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span class="footer-logo">한국지방재정공제회 복지시스템</span>
+      <span class="footer-page">5 / 6</span>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 7: 위험 요소 및 대응 -->
+<div class="slide">
+  <div class="slide-content">
+    <div class="slide-header">
+      <div class="slide-num">6</div>
+      <div>
+        <div class="slide-title">위험 요소와 대응 방안</div>
+        <div class="slide-subtitle">리스크 평가</div>
+      </div>
+    </div>
+
+    <table style="margin-bottom: 20px;">
+      <tr><th>위험</th><th>가능성</th><th>영향도</th><th>대응 방안</th></tr>
+      <tr><td>비밀번호 유출</td><td style="color:#059669">낮음</td><td>보통</td><td>암호화 저장, 정기 변경 안내</td></tr>
+      <tr><td>계정 탈취</td><td style="color:#059669">낮음</td><td>보통</td><td>관리자 즉시 비활성화</td></tr>
+      <tr><td>데이터 유출</td><td style="color:#059669">매우 낮음</td><td>높음</td><td>Firestore 보안 규칙, HTTPS</td></tr>
+      <tr><td>서비스 장애</td><td style="color:#059669">매우 낮음</td><td>보통</td><td>Google SLA 99.999% 보장</td></tr>
+      <tr><td>방화벽 차단</td><td style="color:#f59e0b">중간</td><td>높음</td><td>도메인 화이트리스트 등록 요청</td></tr>
+    </table>
+
+    <div class="warn-box">
+      <p style="font-size:13px; color:#92400e;">⚠️ <strong>주의사항:</strong> 회사 방화벽에서 Firebase 도메인이 차단된 경우, 정보화팀에 아래 도메인 허용 요청이 필요합니다.</p>
+      <p style="font-size:12px; color:#78350f; margin-top:6px; font-family: monospace;">*.firebaseapp.com, *.web.app, *.googleapis.com, *.firebaseio.com</p>
+    </div>
+
+    <div class="footer">
+      <span class="footer-logo">한국지방재정공제회 복지시스템</span>
+      <span class="footer-page">6 / 6</span>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 8: 결론 -->
+<div class="slide slide-conclusion">
+  <div style="font-size: 48px; margin-bottom: 20px;">🛡️</div>
+  <h2>보안 검토 결론</h2>
+  <div class="conclusion-badge">✅ 운영 적합 판정</div>
+  <p>
+    이 시스템은 Google의 엔터프라이즈급 보안 인프라를 사용하며,<br>
+    접근 제어, 암호화, 최소 권한 원칙을 모두 적용하고 있습니다.<br><br>
+    <strong>내부 복지 신청 시스템으로서 충분한 보안 수준을 갖추고 있습니다.</strong>
+  </p>
+  <div style="margin-top: 40px; font-size: 14px; opacity: 0.6;">
+    문의: 시스템 담당자 | 2026년 3월
+  </div>
+</div>
+
+</body>
+</html>

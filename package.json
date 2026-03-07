@@ -8,9 +8,20 @@
     "start": "next start"
   },
   "dependencies": {
+    "@splinetool/react-spline": "^4.1.0",
+    "@splinetool/runtime": "^1.12.67",
+    "@types/nodemailer": "^7.0.11",
+    "dotenv": "^17.3.1",
+    "firebase": "^12.10.0",
+    "firebase-admin": "^13.7.0",
+    "firebase-admin-a14c8a5423a75469": "npm:firebase-admin@^13.7.0",
+    "googleapis": "^171.4.0",
+    "matter-js": "^0.20.0",
     "next": "16.1.6",
+    "nodemailer": "^8.0.1",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^20",

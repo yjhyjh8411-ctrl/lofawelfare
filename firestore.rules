@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuth() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true ||
+        request.auth.uid == 'admin'
+      );
+    }
+
+    function isOwner(userId) {
+      return isAuth() && request.auth.uid == userId;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuth();
+      allow create: if isOwner(userId);
+      allow update, delete: if isOwner(userId) || isAdmin();
+    }
+
+    // Applications collection
+    match /applications/{appId} {
+      allow read: if isAuth() && (
+        isAdmin() ||
+        resource.data.user_id == request.auth.uid ||
+        resource.data['applicant']['사번'] == get(/databases/$(database)/documents/users/$(request.auth.uid)).data['사번']
+      );
+      allow create: if isAuth();
+      allow update, delete: if isAdmin() || resource.data.user_id == request.auth.uid;
+    }
+
+    // Form configs - read by all authenticated, write by admin only
+    match /form_configs/{formId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // Budget groups - read by authenticated, write by admin
+    match /budget_groups/{groupId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // Settings - read by all, write by admin only
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Regulations - read by authenticated, write by admin
+    match /regulations/{regId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+  }
+}
