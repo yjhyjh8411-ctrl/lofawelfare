@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { collection, getDocs, doc, setDoc } from 'firebase/firestore'
+import { getIdToken } from 'firebase/auth'
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/lib/auth-context'
 import Navbar from '@/components/Navbar'
 
 export default function AdminSettingsPage() {
-  const { profile, loading } = useAuth()
+  const { user, profile, loading } = useAuth()
   const router = useRouter()
   const [annualBudget, setAnnualBudget] = useState('')
   const [usedBudget, setUsedBudget] = useState('')
@@ -47,12 +48,18 @@ export default function AdminSettingsPage() {
 
   const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000) }
 
+  const getToken = async () => {
+    if (!user) throw new Error('로그인이 필요합니다.')
+    return getIdToken(user)
+  }
+
   const handleSyncEmails = async () => {
     if (!confirm('Firestore의 이메일을 Firebase Auth 로그인 이메일로 동기화합니다. 계속하시겠습니까?')) return
     setSyncing(true)
     setSyncResult(null)
     try {
-      const res = await fetch('/api/sync-emails', { method: 'POST' })
+      const token = await getToken()
+      const res = await fetch('/api/sync-emails', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } })
       const data = await res.json()
       setSyncResult(data)
     } catch {
@@ -81,9 +88,10 @@ export default function AdminSettingsPage() {
     setMigrating(true)
     setMigrResult(null)
     try {
+      const token = await getToken()
       const res = await fetch('/api/migrate-project', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
           targetProjectId: newProjectId,
           targetClientEmail: newClientEmail,

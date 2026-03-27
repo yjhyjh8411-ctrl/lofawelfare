@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-auth'
 import { getAdminDb } from '@/lib/firebase-admin'
 import { FieldValue } from 'firebase-admin/firestore'
 
@@ -79,7 +80,10 @@ export async function GET(request: NextRequest) {
 }
 
 // Disconnect: clear Solapi OAuth tokens
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
+  const auth = await requireAdmin(request)
+  if (auth instanceof NextResponse) return auth
+
   try {
     const db = getAdminDb()
     await db.collection('settings').doc('notify').update({

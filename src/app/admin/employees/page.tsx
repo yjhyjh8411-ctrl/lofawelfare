@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { collection, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore'
+import { getIdToken } from 'firebase/auth'
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/lib/auth-context'
 
@@ -56,14 +57,20 @@ export default function EmployeesPage() {
 
   const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000) }
 
+  const getToken = async () => {
+    if (!user) throw new Error('로그인이 필요합니다.')
+    return getIdToken(user)
+  }
+
   const handleUserSave = async () => {
     if (!userEditModal) return
     await updateDoc(doc(db, 'users', userEditModal.id), {
       성명: userEditData.성명, 부서: userEditData.부서, 직급: userEditData.직급, isAdmin: userEditData.isAdmin,
     })
     if (userEditData.이메일 && userEditData.이메일 !== userEditModal.이메일) {
+      const token = await getToken()
       await fetch('/api/update-email', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ uid: userEditModal.id, email: userEditData.이메일 }),
       })
     }
@@ -82,8 +89,9 @@ export default function EmployeesPage() {
 
   const handleDeleteUser = async () => {
     if (!userDeleteConfirm) return
+    const token = await getToken()
     const res = await fetch('/api/delete-user', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ uid: userDeleteConfirm.id }),
     })
     if (res.ok) { setUsers(prev => prev.filter(u => u.id !== userDeleteConfirm.id)); showMsg('직원이 삭제되었습니다.') }
@@ -96,8 +104,9 @@ export default function EmployeesPage() {
     const password = reset ? 'lofa1234!' : pwValue.trim()
     if (!password || password.length < 6) { setPwMsg('비밀번호는 6자 이상이어야 합니다.'); return }
     setPwLoading(true); setPwMsg('')
+    const token = await getToken()
     const res = await fetch('/api/reset-password', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ uid: pwModal.id, password }),
     })
     if (res.ok) { setPwModal(null); setPwValue(''); showMsg(reset ? '비밀번호가 lofa1234!로 초기화되었습니다.' : '비밀번호가 변경되었습니다.') }

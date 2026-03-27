@@ -1,11 +1,15 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-auth'
 import { getAdminAuth, getAdminDb } from '@/lib/firebase-admin'
 
 export const dynamic = 'force-dynamic'
 
-export async function POST() {
+export async function POST(request: NextRequest) {
+  const auth = await requireAdmin(request)
+  if (auth instanceof NextResponse) return auth
+
   try {
-    const auth = getAdminAuth()
+    const adminAuth = getAdminAuth()
     const db = getAdminDb()
 
     const usersSnap = await db.collection('users').get()
@@ -22,20 +26,18 @@ export async function POST() {
       }
 
       try {
-        // Try to get existing Auth user
-        const currentUser = await auth.getUser(uid)
+        const currentUser = await adminAuth.getUser(uid)
         if (currentUser.email === realEmail) {
           results.push({ uid, email: realEmail, status: 'already_synced' })
         } else {
-          await auth.updateUser(uid, { email: realEmail })
+          await adminAuth.updateUser(uid, { email: realEmail })
           results.push({ uid, email: realEmail, status: 'updated' })
         }
       } catch (e) {
         const errCode = (e as { code?: string }).code
         if (errCode === 'auth/user-not-found') {
-          // Auth account was deleted — recreate with uid
           try {
-            await auth.createUser({
+            await adminAuth.createUser({
               uid,
               email: realEmail,
               password: 'lofa1234!',

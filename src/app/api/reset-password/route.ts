@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-auth'
 import { getAdminAuth } from '@/lib/firebase-admin'
 
 export const dynamic = 'force-dynamic'
@@ -6,6 +7,9 @@ export const dynamic = 'force-dynamic'
 const DEFAULT_PASSWORD = 'lofa1234!'
 
 export async function POST(request: NextRequest) {
+  const auth = await requireAdmin(request)
+  if (auth instanceof NextResponse) return auth
+
   try {
     const { uid, password } = await request.json()
     if (!uid) {
@@ -17,8 +21,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ status: 'error', message: '비밀번호는 6자 이상이어야 합니다.' }, { status: 400 })
     }
 
-    const auth = getAdminAuth()
-    await auth.updateUser(uid, { password: newPassword })
+    const adminAuth = getAdminAuth()
+    await adminAuth.updateUser(uid, { password: newPassword })
 
     return NextResponse.json({ status: 'success' })
   } catch (err: unknown) {

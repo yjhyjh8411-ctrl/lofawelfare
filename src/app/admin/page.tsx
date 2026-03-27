@@ -6,7 +6,7 @@ import {
   collection, getDocs, doc, updateDoc, deleteDoc, orderBy, query, setDoc, getDoc, serverTimestamp,
 } from 'firebase/firestore'
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
-import { signOut } from 'firebase/auth'
+import { signOut, getIdToken } from 'firebase/auth'
 import { auth as firebaseAuth, db, storage } from '@/lib/firebase'
 import { useAuth } from '@/lib/auth-context'
 import { useCallback } from 'react'
@@ -941,7 +941,8 @@ function AdminPageInner() {
                 <button onClick={() => { window.location.href = '/api/solapi-oauth' }}
                   style={{ ...btnAction, background: '#6b7280' }}>다른 계정</button>
                 <button onClick={async () => {
-                  await fetch('/api/solapi-oauth', { method: 'DELETE' })
+                  const token = user ? await getIdToken(user) : ''
+                  await fetch('/api/solapi-oauth', { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } })
                   setSolapiConnected(false)
                   showMsg('Solapi 연동이 해제되었습니다.')
                   setSmsModal(false)
@@ -1025,7 +1026,8 @@ function AdminPageInner() {
                 </button>
                 <button
                   onClick={async () => {
-                    await fetch('/api/google-oauth', { method: 'DELETE' })
+                    const token = user ? await getIdToken(user) : ''
+                    await fetch('/api/google-oauth', { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } })
                     setGmailConnected(null)
                     showMsg('Gmail 연동이 해제되었습니다.')
                     setEmailModal(false)

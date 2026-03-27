@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-auth'
 import { initializeApp, cert, getApps, deleteApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import { getAuth } from 'firebase-admin/auth'
@@ -6,6 +7,9 @@ import { getAuth } from 'firebase-admin/auth'
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
+  const auth = await requireAdmin(request)
+  if (auth instanceof NextResponse) return auth
+
   try {
     const body = await request.json()
     const { targetProjectId, targetClientEmail, targetPrivateKey } = body
@@ -14,12 +18,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ status: 'error', message: '새 프로젝트 정보를 모두 입력해주세요.' }, { status: 400 })
     }
 
-    // Source: current project (from env)
     const { getAdminDb, getAdminAuth } = await import('@/lib/firebase-admin')
     const sourceDb = getAdminDb()
     const sourceAuth = getAdminAuth()
 
-    // Target: new project
     const targetAppName = `migration-target-${Date.now()}`
     const targetApp = initializeApp(
       {
@@ -36,7 +38,6 @@ export async function POST(request: NextRequest) {
 
     const results: Record<string, number> = {}
 
-    // Migrate collections
     const collections = ['users', 'applications', 'form_configs', 'settings']
     for (const col of collections) {
       const snap = await sourceDb.collection(col).get()
@@ -48,7 +49,6 @@ export async function POST(request: NextRequest) {
       results[col] = count
     }
 
-    // Migrate Auth users
     let authCount = 0
     let pageToken: string | undefined
     do {
@@ -71,7 +71,6 @@ export async function POST(request: NextRequest) {
       pageToken = listResult.pageToken
     } while (pageToken)
 
-    // Reset passwords to lofa1234!
     const allUsers = await targetAuth.listUsers(1000)
     for (const u of allUsers.users) {
       await targetAuth.updateUser(u.uid, { password: 'lofa1234!' })
@@ -79,7 +78,6 @@ export async function POST(request: NextRequest) {
 
     results['auth_accounts'] = authCount
 
-    // Cleanup temp app
     await deleteApp(targetApp)
 
     return NextResponse.json({
