@@ -45,21 +45,17 @@ const forms = {
   'living-welfare': {
     한도설명: '월 10만원 한도 / 연간 120만원 한도',
     fields: [
-      { id: 'targetName', label: '대상자 성명', type: 'text', section: '신청 내용', required: true, placeholder: '예: 본인' },
-      { id: 'supportItem', label: '지원 항목', type: 'text', section: '신청 내용', required: true, placeholder: '예: 영어학원 수강료, 도서구입비 등' },
-      { id: 'amount', label: '신청 금액', type: 'amount', section: '신청 내용', required: true },
-      { id: 'account', label: '지급 계좌번호', type: 'account', section: '신청 내용', required: true },
-      { id: 'attachment', label: '증빙서류 첨부', type: 'file', section: '신청 내용', required: false, hint: '영수증, 수강 등록확인서 등' },
+      { id: 'living_detail', label: '생활복지 사용내역', type: 'living_records', section: '생활복지 사용내역', required: true },
+      { id: 'account', label: '지급 계좌번호', type: 'account', section: '계좌 및 첨부', required: true },
+      { id: 'attachment', label: '증빙서류 첨부', type: 'file', section: '계좌 및 첨부', required: false, hint: '영수증, 수강 등록확인서 등' },
     ]
   },
   'cultural-activity': {
     한도설명: '반기 30만원 한도 / 연간 60만원 한도',
     fields: [
-      { id: 'targetName', label: '대상자 성명 (관계)', type: 'text', section: '신청 내용', required: true, placeholder: '예: 본인 또는 배우자(홍길동)' },
-      { id: 'activityContent', label: '문화활동 내용', type: 'text', section: '신청 내용', required: true, placeholder: '예: 뮤지컬 시카고 관람' },
-      { id: 'amount', label: '신청 금액', type: 'amount', section: '신청 내용', required: true },
-      { id: 'account', label: '지급 계좌번호', type: 'account', section: '신청 내용', required: true },
-      { id: 'attachment', label: '증빙서류 첨부', type: 'file', section: '신청 내용', required: false, hint: '영수증, 티켓, 온라인결제내역 등' },
+      { id: 'cultural_detail', label: '문화활동 사용내역', type: 'cultural_records', section: '문화활동 사용내역', required: true },
+      { id: 'account', label: '지급 계좌번호', type: 'account', section: '계좌 및 첨부', required: true },
+      { id: 'attachment', label: '증빙서류 첨부', type: 'file', section: '계좌 및 첨부', required: false, hint: '영수증, 티켓, 온라인결제내역 등' },
     ]
   },
   'loan-application': {
