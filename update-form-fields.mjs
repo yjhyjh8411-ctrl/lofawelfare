@@ -90,11 +90,9 @@ const forms = {
   'vaccination': {
     한도설명: '연간 15만원 한도 · 금액이 기재된 보험 영수증(또는 진료비 세부내역서)를 반드시 첨부해 주세요.',
     fields: [
-      { id: 'targetName', label: '대상자', type: 'text', section: '신청 내용', required: true, placeholder: '성명' },
-      { id: 'vaccineType', label: '접종 항목', type: 'text', section: '신청 내용', required: true, placeholder: '예: 독감 예방접종' },
-      { id: 'amount', label: '신청 금액', type: 'amount', section: '신청 내용', required: true },
-      { id: 'account', label: '지급 계좌번호', type: 'account', section: '신청 내용', required: true },
-      { id: 'attachment', label: '증빙서류 첨부', type: 'file', section: '신청 내용', required: true },
+      { id: 'vaccination_records', label: '예방접종 상세내역', type: 'vaccination_records', section: '예방접종 상세내역', required: true },
+      { id: 'account', label: '지급 계좌번호', type: 'account', section: '계좌 및 첨부', required: true },
+      { id: 'attachment', label: '증빙서류 첨부', type: 'file', section: '계좌 및 첨부', required: true, hint: '접종 영수증 또는 진료비 세부내역서 등 증빙서류를 첨부해 주세요.' },
     ]
   },
   'scholarship': {

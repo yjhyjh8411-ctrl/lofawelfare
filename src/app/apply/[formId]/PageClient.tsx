@@ -9,7 +9,7 @@ import { useAuth } from '@/lib/auth-context'
 
 type FieldType = 'text' | 'number' | 'amount' | 'date' | 'select' | 'textarea' | 'file'
   | 'account' | 'radio' | 'medical_records' | 'scholarship_records' | 'children_records' | 'loan_agreement'
-  | 'living_records' | 'cultural_records'
+  | 'living_records' | 'cultural_records' | 'vaccination_records'
 
 interface FormField {
   id: string
@@ -61,10 +61,11 @@ function getEmptyRow(type: string): Record<string, string> {
   if (type === 'children_records') return { 성명: '', 생년월일: '', 비고: '' }
   if (type === 'living_records') return { 사용처: '', 사용일자: '', 금액: '' }
   if (type === 'cultural_records') return { 활동내용: '', 사용일자: '', 금액: '' }
+  if (type === 'vaccination_records') return { 대상자: '', 접종항목: '', 접종일: '', 금액: '' }
   return {}
 }
 
-const DYNAMIC_TYPES = ['medical_records', 'scholarship_records', 'children_records', 'living_records', 'cultural_records']
+const DYNAMIC_TYPES = ['medical_records', 'scholarship_records', 'children_records', 'living_records', 'cultural_records', 'vaccination_records']
 
 export default function ApplyPage() {
   const params = useParams()
@@ -217,6 +218,7 @@ export default function ApplyPage() {
           if (f.type === 'scholarship_records') appData['장학금총액'] = rows.reduce((s, r) => s + (parseInt(r.금액) || 0), 0)
           if (f.type === 'living_records') appData['생활복지총액'] = rows.reduce((s, r) => s + (parseInt(r.금액) || 0), 0)
           if (f.type === 'cultural_records') appData['문화활동총액'] = rows.reduce((s, r) => s + (parseInt(r.금액) || 0), 0)
+          if (f.type === 'vaccination_records') appData['예방접종총액'] = rows.reduce((s, r) => s + (parseInt(r.금액) || 0), 0)
         } else if (f.type === 'loan_agreement') {
           appData[f.label] = '동의함'
         } else {
@@ -425,6 +427,39 @@ export default function ApplyPage() {
               ))}
               <div style={{ ...tblRow, gridTemplateColumns: '1fr 140px 110px 32px', background: '#f9fafb', fontWeight: 700 }}>
                 <span style={{ gridColumn: '1/3', fontSize: 13 }}>총 합계</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#1a56db' }}>
+                  <span style={{ fontSize: 12, fontWeight: 400, color: '#6b7280' }}>₩</span>{total.toLocaleString()}<span style={{ fontSize: 12, fontWeight: 400, color: '#6b7280' }}>원</span>
+                </div>
+                <div />
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      case 'vaccination_records': {
+        const rows = dynRows[field.id] || [{ 대상자: '', 접종항목: '', 접종일: '', 금액: '' }]
+        const total = rows.reduce((s, r) => s + (parseInt(r.금액) || 0), 0)
+        return (
+          <div key={field.id}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+              <button type="button" onClick={() => addRow(field.id, field.type)} style={addRowBtn}>+ 내역 추가</button>
+            </div>
+            <div style={tblWrap}>
+              <div style={{ ...tblHead, gridTemplateColumns: '110px 1fr 140px 110px 32px' }}>
+                <span>대상자</span><span>접종 항목</span><span>접종일</span><span>금액</span><span></span>
+              </div>
+              {rows.map((row, i) => (
+                <div key={i} style={{ ...tblRow, gridTemplateColumns: '110px 1fr 140px 110px 32px' }}>
+                  <input type="text" value={row.대상자} placeholder="성명" onChange={e => updateRow(field.id, i, '대상자', e.target.value)} style={cellInput} />
+                  <input type="text" value={row.접종항목} placeholder="예: 독감 예방접종" onChange={e => updateRow(field.id, i, '접종항목', e.target.value)} style={cellInput} />
+                  <input type="date" value={row.접종일} onChange={e => updateRow(field.id, i, '접종일', e.target.value)} style={cellInput} />
+                  <input type="number" value={row.금액} placeholder="0" min="0" onChange={e => updateRow(field.id, i, '금액', e.target.value)} style={{ ...cellInput, textAlign: 'right' }} />
+                  <button type="button" onClick={() => removeRow(field.id, i)} disabled={rows.length <= 1} style={delRowBtn(rows.length > 1)}>×</button>
+                </div>
+              ))}
+              <div style={{ ...tblRow, gridTemplateColumns: '110px 1fr 140px 110px 32px', background: '#f9fafb', fontWeight: 700 }}>
+                <span style={{ gridColumn: '1/4', fontSize: 13 }}>총 합계</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#1a56db' }}>
                   <span style={{ fontSize: 12, fontWeight: 400, color: '#6b7280' }}>₩</span>{total.toLocaleString()}<span style={{ fontSize: 12, fontWeight: 400, color: '#6b7280' }}>원</span>
                 </div>

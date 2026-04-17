@@ -10,7 +10,7 @@ import Navbar from '@/components/Navbar'
 interface FormField {
   id: string
   label: string
-  type: 'text' | 'number' | 'amount' | 'date' | 'select' | 'textarea' | 'file' | 'account' | 'radio' | 'medical_records' | 'scholarship_records' | 'children_records' | 'loan_agreement'
+  type: 'text' | 'number' | 'amount' | 'date' | 'select' | 'textarea' | 'file' | 'account' | 'radio' | 'medical_records' | 'scholarship_records' | 'children_records' | 'loan_agreement' | 'vaccination_records' | 'living_records' | 'cultural_records'
   required: boolean
   sensitive?: boolean
   options?: string
@@ -176,7 +176,10 @@ export default function FormEditPage() {
                     <option value="file">📎 파일첨부</option>
                     <option value="account">🏦 계좌번호 (은행/계좌/예금주)</option>
                     <option value="medical_records">🏥 의료비 내역 (표)</option>
+                    <option value="vaccination_records">💉 예방접종 내역 (표)</option>
                     <option value="scholarship_records">🎓 장학금 내역 (표)</option>
+                    <option value="living_records">🛍️ 생활복지 내역 (표)</option>
+                    <option value="cultural_records">🎭 문화활동 내역 (표)</option>
                     <option value="children_records">👶 자녀 정보 (표)</option>
                     <option value="loan_agreement">📝 대부 동의서</option>
                   </select>
