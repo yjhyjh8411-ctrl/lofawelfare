@@ -1,121 +1,241 @@
 'use client'
 
-import { useFormState, useFormStatus } from 'react-dom'
-import { handleSubmit } from '@/app/actions'
-import Link from 'next/link'
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { collection, getDocs, query, where, getDoc, doc } from 'firebase/firestore'
+import { db } from '@/lib/firebase'
+import { useAuth } from '@/lib/auth-context'
+import Navbar from '@/components/Navbar'
 
-const initialState = {
-  message: '',
+interface FormConfig {
+  id: string
+  제목: string
+  설명: string
+  한도설명?: string
+  icon?: string
+  color?: string
+  isActive: boolean
+  order: number
+  periods?: { year: number; start: string; end: string }[]
 }
 
-function SubmitButton() {
-  const { pending } = useFormStatus()
-
-  return (
-    <button 
-      type="submit" 
-      aria-disabled={pending}
-      className="w-full px-6 py-3 text-lg font-semibold text-white bg-indigo-600 rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-300 disabled:bg-gray-400 disabled:cursor-not-allowed"
-    >
-      {pending ? '처리 중...' : '제출하기'}
-    </button>
-  )
+interface BudgetGroup {
+  id: string
+  name: string
+  limitAmount: number
+  period: 'annual' | 'monthly'
+  formIds: string[]
 }
 
 export default function ApplyPage() {
-  const [state, formAction] = useFormState(handleSubmit, initialState)
+  const { user, profile, loading } = useAuth()
+  const router = useRouter()
+  const [forms, setForms] = useState<FormConfig[]>([])
+  const [approvedByForm, setApprovedByForm] = useState<Record<string, number>>({})
+  const [budgetGroups, setBudgetGroups] = useState<BudgetGroup[]>([])
+  const [dataLoading, setDataLoading] = useState(true)
+  const [alertMsg, setAlertMsg] = useState('')
+
+  useEffect(() => {
+    if (!loading && !user) router.replace('/login')
+  }, [user, loading, router])
+
+  useEffect(() => {
+    if (!user) return
+    const load = async () => {
+      try {
+        const year = new Date().getFullYear()
+
+        const formsSnap = await getDocs(collection(db, 'form_configs'))
+        const formList = formsSnap.docs
+          .map(d => ({ id: d.id, ...d.data() } as FormConfig))
+          .filter(f => f.isActive)
+          .sort((a, b) => (a.order || 0) - (b.order || 0))
+        setForms(formList)
+
+        const groupsSnap = await getDocs(collection(db, 'budget_groups'))
+        setBudgetGroups(groupsSnap.docs.map(d => ({ id: d.id, ...d.data() } as BudgetGroup)))
+
+        const userDocSnap = await getDoc(doc(db, 'users', user.uid))
+        const employeeId = userDocSnap.exists() ? (userDocSnap.data()?.['사번'] || '') : ''
+        const appsSnap = employeeId
+          ? await getDocs(query(collection(db, 'applications'), where('applicant.사번', '==', employeeId)))
+          : await getDocs(query(collection(db, 'applications'), where('user_id', '==', user.uid)))
+        const yearApps = appsSnap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(a => {
+            const d = (a as Record<string, unknown>).created_at as { toDate?: () => Date } | null
+            return d?.toDate?.()?.getFullYear() === year
+          })
+
+        const byForm: Record<string, number> = {}
+        yearApps.filter(a => (a as Record<string, unknown>).status === 'approved').forEach(a => {
+          const data = (a as Record<string, unknown>).data as Record<string, unknown> | undefined
+          const formId = (a as Record<string, unknown>).form_id as string
+          const amt = extractAmount(data)
+          byForm[formId] = (byForm[formId] || 0) + amt
+        })
+        setApprovedByForm(byForm)
+      } catch (e) { console.error('Apply page load error:', e) }
+      finally { setDataLoading(false) }
+    }
+    load()
+  }, [user])
+
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', fontSize: 14, color: '#9ca3af', background: '#f8f9fa' }}>
+      로딩 중...
+    </div>
+  )
+  if (!user) return null
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-       <div className="w-full max-w-2xl mx-auto bg-white rounded-2xl shadow-xl p-8 md:p-12">
-        <div className="mb-8 text-center">
-          <h1 className="text-4xl font-bold text-gray-800">복지혜택 신청</h1>
-          <p className="mt-2 text-gray-500">필요한 정보를 입력하고 신청서를 제출해주세요.</p>
+    <div style={{ minHeight: '100vh', background: '#f8f9fa', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
+      <Navbar />
+      {alertMsg && (
+        <div style={{ position: 'fixed', top: 72, left: '50%', transform: 'translateX(-50%)', background: '#dc2626', color: '#fff', padding: '12px 28px', borderRadius: 10, zIndex: 9999, fontWeight: 600, fontSize: 14, boxShadow: '0 4px 16px rgba(0,0,0,0.15)', whiteSpace: 'nowrap' }}>
+          {alertMsg}
+        </div>
+      )}
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 20px 60px' }}>
+        <div style={{ marginBottom: 28 }}>
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: '#111827', marginBottom: 6 }}>신청 가능한 복지 항목</h1>
+          <p style={{ fontSize: 14, color: '#6b7280' }}>사내근로복지기금에서 신청 가능한 항목을 확인하고 신청하세요.</p>
         </div>
 
-        {state?.message ? (
-          <div className="text-center p-6 bg-green-100 text-green-800 rounded-lg mb-6">
-            <p className="font-semibold text-lg">{state.message}</p>
-            <Link href="/dashboard" className="mt-4 inline-block text-indigo-600 hover:text-indigo-800 font-semibold">
-              대시보드로 돌아가기
-            </Link>
+        {/* Budget group banners */}
+        {budgetGroups.map(group => {
+          const groupTotal = group.formIds.reduce((s, fid) => s + (approvedByForm[fid] || 0), 0)
+          const remaining = group.limitAmount - groupTotal
+          const pct = Math.min((groupTotal / group.limitAmount) * 100, 100)
+          return (
+            <div key={group.id} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 16px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10, background: '#fff', flexWrap: 'wrap' }}>
+              <span style={{ background: '#fef3c7', color: '#92400e', padding: '2px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{group.name}</span>
+              <span style={{ fontSize: 12, color: '#9ca3af' }}>
+                {forms.filter(f => group.formIds.includes(f.id)).map(f => f.제목).join(' · ')}
+              </span>
+              <span style={{ marginLeft: 'auto', fontSize: 12, color: '#374151', whiteSpace: 'nowrap' }}>
+                사용 <strong>{groupTotal.toLocaleString()}원</strong>
+                <span style={{ color: '#9ca3af' }}> / 잔여 <strong style={{ color: remaining > 0 ? '#059669' : '#dc2626' }}>{remaining.toLocaleString()}원</strong></span>
+                <span style={{ color: '#d1d5db' }}> (연 {group.limitAmount.toLocaleString()}원)</span>
+              </span>
+              <div style={{ width: '100%', height: 3, background: '#f3f4f6', borderRadius: 2 }}>
+                <div style={{ height: '100%', width: `${pct}%`, background: pct >= 100 ? '#ef4444' : '#4285f4', borderRadius: 2, transition: 'width 0.4s' }} />
+              </div>
+            </div>
+          )
+        })}
+
+        {/* Form cards grid */}
+        {dataLoading ? (
+          <div style={{ textAlign: 'center', padding: 60, color: '#9ca3af' }}>로딩 중...</div>
+        ) : forms.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 60, color: '#9ca3af', background: '#fff', borderRadius: 14, border: '1px solid #e5e7eb' }}>
+            현재 신청 가능한 복지 항목이 없습니다.
           </div>
         ) : (
-          <form action={formAction} className="space-y-6">
-            <div>
-              <label htmlFor="applicantName" className="block text-sm font-medium text-gray-700 mb-1">신청자 이름</label>
-              <input
-                type="text"
-                id="applicantName"
-                name="applicantName"
-                required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-              />
-            </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16, marginTop: 16 }}>
+            {forms.map(f => {
+              const approved = approvedByForm[f.id] || 0
+              const iconColor = f.color || '#4285f4'
+              const now = new Date().toISOString().slice(0, 10)
+              const periods = f.periods || []
+              const activePeriod = periods.find(p => p.start && p.end && now >= p.start && now <= p.end)
+              const nextPeriod = periods.filter(p => p.start && now < p.start).sort((a, b) => a.start.localeCompare(b.start))[0]
+              const isInPeriod = !!activePeriod
+              const hasPeriods = periods.length > 0
 
-            <div>
-              <label htmlFor="employeeId" className="block text-sm font-medium text-gray-700 mb-1">사원번호</label>
-              <input
-                type="text"
-                id="employeeId"
-                name="employeeId"
-                required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-              />
-            </div>
+              const handleClick = () => {
+                if (hasPeriods && !isInPeriod) {
+                  if (nextPeriod) {
+                    setAlertMsg(`현재 신청기간이 아닙니다. 다음 신청기간: ${nextPeriod.start} ~ ${nextPeriod.end}`)
+                  } else {
+                    setAlertMsg('현재 신청기간이 아닙니다.')
+                  }
+                  setTimeout(() => setAlertMsg(''), 3000)
+                  return
+                }
+                router.push(`/apply/_/?formId=${f.id}`)
+              }
 
-            <div>
-              <label htmlFor="benefitType" className="block text-sm font-medium text-gray-700 mb-1">복지혜택 종류</label>
-              <select
-                id="benefitType"
-                name="benefitType"
-                required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-              >
-                <option value="">선택하세요...</option>
-                <option value="의료비 지원">의료비 지원</option>
-                <option value="자녀 학자금 지원">자녀 학자금 지원</option>
-                <option value="주택자금 대출이자 지원">주택자금 대출이자 지원</option>
-                <option value="경조사비 지원">경조사비 지원</option>
-                <option value="자기계발비 지원">자기계발비 지원</option>
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="amount" className="block text-sm font-medium text-gray-700 mb-1">신청 금액</label>
-              <input
-                type="number"
-                id="amount"
-                name="amount"
-                required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-                placeholder="숫자만 입력하세요"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="reason" className="block text-sm font-medium text-gray-700 mb-1">신청 사유</label>
-              <textarea
-                id="reason"
-                name="reason"
-                rows={4}
-                required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-              ></textarea>
-            </div>
-
-            <SubmitButton />
-          </form>
-        )}
-
-        {!state?.message && (
-            <div className="mt-6 text-center">
-                <Link href="/dashboard" className="text-sm text-gray-600 hover:text-indigo-500">
-                    취소하고 대시보드로 돌아가기
-                </Link>
-            </div>
+              return (
+                <div
+                  key={f.id}
+                  onClick={handleClick}
+                  style={{ ...cardStyle, padding: '22px 24px', cursor: 'pointer', transition: 'box-shadow 0.15s, transform 0.15s', opacity: hasPeriods && !isInPeriod ? 0.6 : 1 }}
+                  onMouseEnter={e => {
+                    (e.currentTarget as HTMLDivElement).style.boxShadow = '0 8px 24px rgba(0,0,0,0.1)'
+                    ;(e.currentTarget as HTMLDivElement).style.transform = 'translateY(-3px)'
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget as HTMLDivElement).style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)'
+                    ;(e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: `${iconColor}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>
+                      {f.icon || '📋'}
+                    </div>
+                    {hasPeriods && (
+                      <div style={{ fontSize: 11, lineHeight: 1.5, marginTop: 4 }}>
+                        {activePeriod ? (
+                          <span style={{ color: '#059669', fontWeight: 600 }}>
+                            신청기간: {activePeriod.start.slice(5).replace('-','/')} ~ {activePeriod.end.slice(5).replace('-','/')}
+                          </span>
+                        ) : nextPeriod ? (
+                          <span style={{ color: '#f59e0b', fontWeight: 600 }}>
+                            다음 신청: {nextPeriod.start.slice(5).replace('-','/')} ~ {nextPeriod.end.slice(5).replace('-','/')}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#dc2626', fontWeight: 600 }}>신청 마감</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: '#111827', marginBottom: 6 }}>{f.제목}</div>
+                  <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 16, lineHeight: 1.6 }}>{f.설명}</div>
+                  <div style={{ borderTop: '1px solid #f3f4f6', paddingTop: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 2 }}>올해 승인</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: approved > 0 ? '#4285f4' : '#9ca3af' }}>{approved.toLocaleString()}원</div>
+                    </div>
+                    {f.한도설명 && (
+                      <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'right', maxWidth: 100, lineHeight: 1.4 }}>
+                        한도: {f.한도설명}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         )}
       </div>
     </div>
   )
+}
+
+function extractAmount(data?: Record<string, unknown>): number {
+  if (!data) return 0
+  for (const [k, v] of Object.entries(data)) {
+    if (k.includes('금액') || k === 'amount') {
+      const n = typeof v === 'number' ? v : Number(String(v).replace(/,/g, ''))
+      if (!isNaN(n) && n >= 0) return n
+    }
+  }
+  for (const v of Object.values(data)) {
+    if (typeof v === 'number' && v >= 0) return v
+    if (typeof v === 'string') {
+      const n = Number(v.replace(/,/g, ''))
+      if (!isNaN(n) && n > 0 && n < 1e10) return n
+    }
+  }
+  return 0
+}
+
+const cardStyle: React.CSSProperties = {
+  background: '#fff',
+  border: '1px solid #e5e7eb',
+  borderRadius: 14,
+  boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
 }

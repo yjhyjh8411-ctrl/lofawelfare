@@ -1,20 +1,21 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { AuthProvider } from '@/lib/auth-context'
-import AntigravityEffect from '@/components/AntigravityEffect'
+
+const AntigravityEffect = lazy(() => import('@/components/AntigravityEffect'))
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const [isAntigravityOn, setIsAntigravityOn] = useState(false)
 
-  const toggleAntigravity = () => {
-    setIsAntigravityOn(prev => !prev)
-  }
-
   return (
     <AuthProvider>
       {children}
-      {isAntigravityOn && <AntigravityEffect />}
+      {isAntigravityOn && (
+        <Suspense fallback={null}>
+          <AntigravityEffect />
+        </Suspense>
+      )}
     </AuthProvider>
   )
 }

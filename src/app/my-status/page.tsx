@@ -37,6 +37,7 @@ export default function MyStatusPage() {
   const [apps, setApps] = useState<Application[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [selected, setSelected] = useState<Application | null>(null)
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear())
 
   useEffect(() => {
     if (!loading && !user) router.replace('/login')
@@ -82,9 +83,32 @@ export default function MyStatusPage() {
     <div style={{ minHeight: '100vh', background: '#f3f4f6' }}>
       <Navbar />
       <div style={{ maxWidth: 800, margin: '0 auto', padding: '32px 16px' }}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 24, color: '#111827' }}>내 신청현황</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: '#111827' }}>내 신청현황</h2>
+          {apps.length > 0 && (() => {
+            const years = [...new Set(apps.map(a => a.created_at?.toDate?.()?.getFullYear()).filter((y): y is number => !!y))].sort((a, b) => b - a)
+            return (
+              <div style={{ display: 'flex', gap: 6 }}>
+                {years.map(year => (
+                  <button
+                    key={year}
+                    onClick={() => setSelectedYear(year)}
+                    style={{
+                      padding: '6px 14px', borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                      border: selectedYear === year ? '1px solid #2563eb' : '1px solid #d1d5db',
+                      background: selectedYear === year ? '#2563eb' : '#fff',
+                      color: selectedYear === year ? '#fff' : '#374151',
+                    }}
+                  >
+                    {year}년
+                  </button>
+                ))}
+              </div>
+            )
+          })()}
+        </div>
 
-        {apps.length === 0 ? (
+        {apps.filter(a => a.created_at?.toDate?.()?.getFullYear() === selectedYear).length === 0 ? (
           <div style={{
             background: '#fff', borderRadius: 12, padding: 48,
             textAlign: 'center', color: '#9ca3af', boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
@@ -93,7 +117,7 @@ export default function MyStatusPage() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {apps.map(app => {
+            {apps.filter(a => a.created_at?.toDate?.()?.getFullYear() === selectedYear).map(app => {
               const s = statusInfo(app.status)
               const date = app.created_at?.toDate?.()
               return (
@@ -122,7 +146,7 @@ export default function MyStatusPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
                     {app.status === 'pending' && (
                       <button
-                        onClick={() => router.push(`/apply/${app.form_id}?edit=${app.id}`)}
+                        onClick={() => router.push(`/apply/_/?formId=${app.form_id}&edit=${app.id}`)}
                         style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: 8, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
                       >
                         ✏️ 수정
@@ -155,9 +179,28 @@ export default function MyStatusPage() {
               <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280' }}>✕</button>
             </div>
             {selected.data && Object.entries(selected.data).map(([k, v]) => (
-              <div key={k} style={{ display: 'flex', gap: 12, marginBottom: 10, padding: '8px 0', borderBottom: '1px solid #f3f4f6' }}>
-                <span style={{ color: '#6b7280', minWidth: 100 }}>{k}</span>
-                <span style={{ fontWeight: 500 }}>{String(v)}</span>
+              <div key={k} style={{ marginBottom: 10, padding: '8px 0', borderBottom: '1px solid #f3f4f6' }}>
+                <div style={{ color: '#6b7280', fontSize: 13, marginBottom: 4 }}>{k}</div>
+                <div style={{ fontWeight: 500 }}>
+                  {Array.isArray(v) ? (
+                    <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr>{Object.keys(v[0] || {}).map(h => <th key={h} style={{ textAlign: 'left', padding: '4px 8px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>{h}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {v.map((row: Record<string, string>, i: number) => (
+                          <tr key={i}>{Object.values(row).map((cell, j) => <td key={j} style={{ padding: '4px 8px', borderBottom: '1px solid #f3f4f6' }}>{String(cell)}</td>)}</tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : v && typeof v === 'object' && 'url' in (v as Record<string, unknown>) ? (
+                    <a href={(v as Record<string, string>).url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline' }}>
+                      {(v as Record<string, string>).name || '첨부파일 보기'}
+                    </a>
+                  ) : (
+                    String(v)
+                  )}
+                </div>
               </div>
             ))}
             {selected.status === 'rejected' && selected.reject_reason && (

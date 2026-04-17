@@ -9,7 +9,7 @@ import { useAuth } from '@/lib/auth-context'
 import Navbar from '@/components/Navbar'
 
 export default function ProfilePage() {
-  const { user, profile, loading } = useAuth()
+  const { user, profile, loading, refreshProfile } = useAuth()
   const router = useRouter()
   const [form, setForm] = useState({
     성명: '', 부서: '', 직급: '', 이메일: '', 전화번호: '', 입사일: '',
@@ -62,6 +62,7 @@ export default function ProfilePage() {
         전화번호: form.전화번호,
         입사일: form.입사일,
       })
+      await refreshProfile()
       showMsg(setMsg, '저장되었습니다.')
     } catch {
       showMsg(setMsg, '저장 중 오류가 발생했습니다.')

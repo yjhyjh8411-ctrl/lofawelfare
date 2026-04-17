@@ -58,5 +58,11 @@ service cloud.firestore {
       allow read: if isAuth();
       allow write: if isAdmin();
     }
+
+    // Settlements - read by authenticated, write by admin
+    match /settlements/{docId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
   }
 }

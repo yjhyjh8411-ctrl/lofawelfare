@@ -9,6 +9,7 @@ import { auth, db } from '@/lib/firebase'
 export default function SignupPage() {
   const [form, setForm] = useState({
     employeeId: '', name: '', department: '', position: '',
+    phone: '', hireDate: '',
     email: '', password: '', confirm: '',
   })
   const [error, setError] = useState('')
@@ -22,7 +23,7 @@ export default function SignupPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.employeeId || !form.name || !form.department || !form.position || !form.email || !form.password) {
+    if (!form.employeeId || !form.name || !form.department || !form.position || !form.phone || !form.hireDate || !form.email || !form.password) {
       setError('모든 항목을 입력해주세요.')
       return
     }
@@ -43,6 +44,8 @@ export default function SignupPage() {
         성명: form.name,
         부서: form.department,
         직급: form.position,
+        전화번호: form.phone,
+        입사일: form.hireDate,
         이메일: form.email,
         isAdmin: false,
         status: 'active',
@@ -104,6 +107,16 @@ export default function SignupPage() {
           <div style={{ marginBottom: 14 }}>
             <label style={labelStyle}>직급</label>
             <input type="text" name="position" value={form.position} onChange={handleChange} placeholder="직급을 입력하세요" style={inputStyle} />
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={labelStyle}>전화번호</label>
+            <input type="tel" name="phone" value={form.phone} onChange={handleChange} placeholder="예: 010-1234-5678" style={inputStyle} />
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={labelStyle}>입사일</label>
+            <input type="date" name="hireDate" value={form.hireDate} onChange={handleChange} style={inputStyle} />
           </div>
 
           <div style={{ marginBottom: 14 }}>

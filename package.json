@@ -24,6 +24,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/matter-js": "^0.19.7",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

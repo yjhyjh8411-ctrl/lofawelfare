@@ -6,6 +6,7 @@ import { collection, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firesto
 import { getIdToken } from 'firebase/auth'
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/lib/auth-context'
+import Navbar from '@/components/Navbar'
 
 interface UserDoc {
   id: string
@@ -17,7 +18,9 @@ interface UserDoc {
   전화번호?: string
   입사일?: string
   isAdmin?: boolean
-  status?: string
+  status?: string  // 'active' | 'inactive' | 'leave'
+  leaveStart?: string
+  leaveEnd?: string
 }
 
 
@@ -37,6 +40,9 @@ export default function EmployeesPage() {
   const [pwValue, setPwValue] = useState('')
   const [pwLoading, setPwLoading] = useState(false)
   const [pwMsg, setPwMsg] = useState('')
+  const [leaveModal, setLeaveModal] = useState<UserDoc | null>(null)
+  const [leaveStart, setLeaveStart] = useState('')
+  const [leaveEnd, setLeaveEnd] = useState('')
 
   useEffect(() => {
     if (!loading && (!user || !profile?.isAdmin)) router.replace('/main')
@@ -81,9 +87,27 @@ export default function EmployeesPage() {
 
   const handleDeactivate = async (u: UserDoc) => {
     const newStatus = u.status === 'inactive' ? 'active' : 'inactive'
-    await updateDoc(doc(db, 'users', u.id), { status: newStatus })
-    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, status: newStatus } : x))
+    const update: Record<string, unknown> = { status: newStatus }
+    if (newStatus === 'active') { update.leaveStart = ''; update.leaveEnd = '' }
+    await updateDoc(doc(db, 'users', u.id), update)
+    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, status: newStatus, ...(newStatus === 'active' ? { leaveStart: '', leaveEnd: '' } : {}) } : x))
     showMsg(newStatus === 'inactive' ? '퇴사처리 되었습니다.' : '복직처리 되었습니다.')
+    setUserEditModal(null)
+  }
+
+  const handleLeave = async () => {
+    if (!leaveModal || !leaveStart || !leaveEnd) { showMsg('휴직 기간을 입력해주세요.'); return }
+    await updateDoc(doc(db, 'users', leaveModal.id), { status: 'leave', leaveStart, leaveEnd })
+    setUsers(prev => prev.map(x => x.id === leaveModal.id ? { ...x, status: 'leave', leaveStart, leaveEnd } : x))
+    setLeaveModal(null); setLeaveStart(''); setLeaveEnd('')
+    showMsg('휴직 처리되었습니다.')
+    setUserEditModal(null)
+  }
+
+  const handleReturnFromLeave = async (u: UserDoc) => {
+    await updateDoc(doc(db, 'users', u.id), { status: 'active', leaveStart: '', leaveEnd: '' })
+    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, status: 'active', leaveStart: '', leaveEnd: '' } : x))
+    showMsg('복직 처리되었습니다.')
     setUserEditModal(null)
   }
 
@@ -109,7 +133,24 @@ export default function EmployeesPage() {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ uid: pwModal.id, password }),
     })
-    if (res.ok) { setPwModal(null); setPwValue(''); showMsg(reset ? '비밀번호가 lofa1234!로 초기화되었습니다.' : '비밀번호가 변경되었습니다.') }
+    if (res.ok) {
+      // 비밀번호 변경 메일 발송
+      const email = pwModal.이메일
+      if (email) {
+        const name = pwModal.성명 || ''
+        fetch('/api/notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({
+            type: 'email',
+            email,
+            subject: '[한국지방재정공제회] 비밀번호가 초기화되었습니다',
+            message: `${name}님, 비밀번호가 ${reset ? 'lofa1234!' : '관리자가 설정한 비밀번호'}로 초기화되었습니다.\n로그인 후 반드시 비밀번호를 변경해주세요.\n\n사이트: https://lofawelfare-3ae73.web.app`,
+          }),
+        }).catch(() => {})
+      }
+      setPwModal(null); setPwValue(''); showMsg(reset ? '비밀번호가 lofa1234!로 초기화되었습니다.' : '비밀번호가 변경되었습니다.')
+    }
     else setPwMsg('오류가 발생했습니다.')
     setPwLoading(false)
   }
@@ -118,80 +159,166 @@ export default function EmployeesPage() {
   const filtered = users.filter(u =>
     !q || u.성명?.toLowerCase().includes(q) || u.사번?.toLowerCase().includes(q) || u.부서?.toLowerCase().includes(q)
   )
+  const [deptFilter, setDeptFilter] = useState('')
+  const [roleFilter, setRoleFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+
+  const departments = [...new Set(users.map(u => u.부서).filter(Boolean) as string[])].sort()
+  const finalFiltered = filtered
+    .filter(u => !deptFilter || u.부서 === deptFilter)
+    .filter(u => !roleFilter || (roleFilter === 'admin' ? u.isAdmin : !u.isAdmin))
+    .filter(u => !statusFilter || u.status === statusFilter)
+
+  const totalCount = users.length
+  const employeeCount = users.filter(u => !u.isAdmin && u.status !== 'inactive' && u.status !== 'leave').length
+  const adminCount = users.filter(u => u.isAdmin).length
+  const leaveCount = users.filter(u => u.status === 'leave').length
+  const inactiveCount = users.filter(u => u.status === 'inactive').length
 
   if (loading || !profile?.isAdmin) return null
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f0f2f5', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: '#f8f9fa', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
+      <Navbar />
 
       {msg && (
-        <div style={{ position: 'fixed', top: 66, left: '50%', transform: 'translateX(-50%)', background: '#1a56db', color: '#fff', padding: '12px 24px', borderRadius: 8, zIndex: 9999, fontWeight: 600, boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>
+        <div style={{ position: 'fixed', top: 72, left: '50%', transform: 'translateX(-50%)', background: '#1a56db', color: '#fff', padding: '12px 24px', borderRadius: 8, zIndex: 9999, fontWeight: 600, boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>
           {msg}
         </div>
       )}
 
-      {/* Navbar */}
-      <header style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', height: 56, padding: '0 20px', display: 'flex', alignItems: 'center', gap: 14, position: 'sticky', top: 0, zIndex: 100, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-        <button
-          onClick={() => router.push('/admin')}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: 14, display: 'flex', alignItems: 'center', gap: 4 }}
-        >
-          ← 관리자 홈
-        </button>
-        <div style={{ width: 1, height: 20, background: '#e5e7eb' }} />
-        <div style={{ fontWeight: 700, fontSize: 15, color: '#111827' }}>👥 직원 정보 관리</div>
-        <div style={{ flex: 1 }} />
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="사번 / 이름 / 부서 검색..."
-          style={{ width: 240, border: '1px solid #d1d5db', borderRadius: 8, padding: '6px 12px', fontSize: 13, outline: 'none' }}
-        />
-      </header>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 20px 60px' }}>
 
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 18px' }}>
+        {/* Page header */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24 }}>
+          <div>
+            <h1 style={{ fontSize: 24, fontWeight: 800, color: '#111827', marginBottom: 6 }}>이용자관리</h1>
+            <p style={{ fontSize: 14, color: '#6b7280' }}>사내근로복지기금 시스템 이용자를 관리합니다.</p>
+          </div>
+        </div>
+
+        {/* Stats cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 14, marginBottom: 24 }}>
+          <div style={statsCardStyle}>
+            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>전체 이용자</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{totalCount}명</div>
+          </div>
+          <div style={statsCardStyle}>
+            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>직원</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#059669' }}>{employeeCount}명</div>
+          </div>
+          <div style={statsCardStyle}>
+            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>관리자</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#1a56db' }}>{adminCount}명</div>
+          </div>
+          <div style={statsCardStyle}>
+            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>휴직</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#f59e0b' }}>{leaveCount}명</div>
+          </div>
+          <div style={statsCardStyle}>
+            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>퇴사</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#dc2626' }}>{inactiveCount}명</div>
+          </div>
+        </div>
+
+        {/* Search & Filters */}
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="이름, 사번으로 검색"
+              style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 8, padding: '10px 14px', fontSize: 14, outline: 'none' }}
+            />
+          </div>
+          <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="">전체 부서</option>
+            {departments.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+          <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="">전체 권한</option>
+            <option value="admin">관리자</option>
+            <option value="employee">직원</option>
+          </select>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="">전체 상태</option>
+            <option value="active">재직</option>
+            <option value="leave">휴직</option>
+            <option value="inactive">퇴사</option>
+          </select>
+          <button onClick={() => { setSearch(''); setDeptFilter(''); setRoleFilter(''); setStatusFilter('') }} style={{ background: '#1a56db', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>
+            검색
+          </button>
+          <button onClick={() => { setSearch(''); setDeptFilter(''); setRoleFilter(''); setStatusFilter('') }} style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 16, color: '#6b7280' }}>
+            ↻
+          </button>
+        </div>
 
         {/* Employee table */}
-        <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.07)', overflow: 'hidden' }}>
+        <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
-              <tr style={{ background: '#f9fafb', borderBottom: '2px solid #e5e7eb' }}>
-                {['사번', '이름', '부서', '직급', '입사일', '전화번호', '이메일', '관리'].map(h => (
-                  <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap', fontSize: 13 }}>{h}</th>
+              <tr style={{ background: '#1a56db' }}>
+                {['이름', '사번', '입사일자', '비밀번호', '부서', '권한', '승인', '관리'].map(h => (
+                  <th key={h} style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', fontSize: 13 }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {dataLoading ? (
                 <tr><td colSpan={8} style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>로딩 중...</td></tr>
-              ) : filtered.length === 0 ? (
+              ) : finalFiltered.length === 0 ? (
                 <tr><td colSpan={8} style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>직원이 없습니다.</td></tr>
-              ) : filtered.map((u, idx) => (
-                <tr key={u.id} style={{ borderBottom: '1px solid #f3f4f6', background: idx % 2 === 0 ? '#fff' : '#fafafa', opacity: u.status === 'inactive' ? 0.55 : 1 }}>
-                  <td style={{ padding: '12px 16px' }}>
-                    <span style={{ background: u.isAdmin ? '#fef3c7' : '#eff6ff', color: u.isAdmin ? '#92400e' : '#1a56db', padding: '2px 8px', borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
-                      {u.사번 || '-'}
+              ) : finalFiltered.map((u, idx) => {
+                const statusLabel = u.status === 'inactive' ? '퇴사' : u.status === 'leave' ? '휴직' : '재직'
+                const statusBg = u.status === 'inactive' ? '#fee2e2' : u.status === 'leave' ? '#fef3c7' : '#d1fae5'
+                const statusColor = u.status === 'inactive' ? '#991b1b' : u.status === 'leave' ? '#92400e' : '#065f46'
+                return (
+                <tr key={u.id} style={{ borderBottom: '1px solid #f3f4f6', background: idx % 2 === 0 ? '#fff' : '#fafafa', opacity: u.status === 'inactive' ? 0.55 : u.status === 'leave' ? 0.75 : 1 }}>
+                  <td style={{ padding: '12px 16px', fontWeight: 600, color: '#111827', textAlign: 'center' }}>{u.성명 || '-'}</td>
+                  <td style={{ padding: '12px 16px', textAlign: 'center', color: '#374151' }}>{u.사번 || '-'}</td>
+                  <td style={{ padding: '12px 16px', textAlign: 'center', color: '#6b7280' }}>{u.입사일 || '-'}</td>
+                  <td style={{ padding: '12px 16px', textAlign: 'center', color: '#9ca3af' }}>****</td>
+                  <td style={{ padding: '12px 16px', textAlign: 'center', color: '#374151' }}>{u.부서 || '-'}</td>
+                  <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                    <span style={{
+                      background: u.isAdmin ? '#dc2626' : '#059669',
+                      color: '#fff',
+                      padding: '3px 12px',
+                      borderRadius: 12,
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}>
+                      {u.isAdmin ? '관리자' : '직원'}
                     </span>
-                    {u.status === 'inactive' && <span style={{ marginLeft: 6, background: '#fee2e2', color: '#991b1b', padding: '1px 6px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>퇴사</span>}
                   </td>
-                  <td style={{ padding: '12px 16px', fontWeight: 600, color: '#111827' }}>{u.성명 || '-'}</td>
-                  <td style={{ padding: '12px 16px', color: '#374151' }}>{u.부서 || '-'}</td>
-                  <td style={{ padding: '12px 16px', color: '#374151' }}>{u.직급 || '-'}</td>
-                  <td style={{ padding: '12px 16px', color: '#6b7280' }}>{u.입사일 || '-'}</td>
-                  <td style={{ padding: '12px 16px', color: '#6b7280' }}>{u.전화번호 || '-'}</td>
-                  <td style={{ padding: '12px 16px', color: '#6b7280' }}>{u.이메일 || '-'}</td>
-                  <td style={{ padding: '12px 16px' }}>
+                  <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                    <span style={{
+                      background: statusBg,
+                      color: statusColor,
+                      padding: '3px 12px',
+                      borderRadius: 12,
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}>
+                      {statusLabel}
+                    </span>
+                    {u.status === 'leave' && u.leaveStart && (
+                      <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>{u.leaveStart} ~ {u.leaveEnd}</div>
+                    )}
+                  </td>
+                  <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                     <button
                       onClick={() => { setUserEditModal(u); setUserEditData({ 성명: u.성명, 부서: u.부서, 직급: u.직급, isAdmin: u.isAdmin, 이메일: u.이메일 }) }}
-                      style={{ background: '#eff6ff', color: '#1a56db', border: 'none', borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
-                    >수정</button>
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: '#6b7280' }}
+                    >···</button>
                   </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
           <div style={{ padding: '12px 16px', borderTop: '1px solid #f3f4f6', color: '#6b7280', fontSize: 13 }}>
-            총 {filtered.length}명
+            총 {finalFiltered.length}명
           </div>
         </div>
       </div>
@@ -235,10 +362,25 @@ export default function EmployeesPage() {
             <button onClick={() => { setPwModal(userEditModal); setUserEditModal(null); setPwValue(''); setPwMsg('') }} style={{ ...btnAction, background: '#7c3aed' }}>비밀번호</button>
             <button onClick={() => setUserEditModal(null)} style={{ ...btnAction, background: '#6b7280' }}>취소</button>
           </div>
-          <div style={{ display: 'flex', gap: 8, paddingTop: 12, borderTop: '1px solid #f3f4f6' }}>
-            <button onClick={() => handleDeactivate(userEditModal)} style={{ ...btnAction, background: userEditModal.status === 'inactive' ? '#059669' : '#f59e0b', fontSize: 13 }}>
-              {userEditModal.status === 'inactive' ? '복직 처리' : '퇴사 처리'}
-            </button>
+          <div style={{ display: 'flex', gap: 8, paddingTop: 12, borderTop: '1px solid #f3f4f6', flexWrap: 'wrap' }}>
+            {userEditModal.status === 'leave' ? (
+              <button onClick={() => handleReturnFromLeave(userEditModal)} style={{ ...btnAction, background: '#059669', fontSize: 13 }}>
+                복직 처리
+              </button>
+            ) : userEditModal.status === 'inactive' ? (
+              <button onClick={() => handleDeactivate(userEditModal)} style={{ ...btnAction, background: '#059669', fontSize: 13 }}>
+                복직 처리
+              </button>
+            ) : (
+              <>
+                <button onClick={() => { setLeaveModal(userEditModal); setLeaveStart(''); setLeaveEnd('') }} style={{ ...btnAction, background: '#f59e0b', fontSize: 13 }}>
+                  휴직 처리
+                </button>
+                <button onClick={() => handleDeactivate(userEditModal)} style={{ ...btnAction, background: '#6b7280', fontSize: 13 }}>
+                  퇴사 처리
+                </button>
+              </>
+            )}
             <button onClick={() => { setUserDeleteConfirm(userEditModal); setUserEditModal(null) }} style={{ ...btnAction, background: '#dc2626', fontSize: 13 }}>삭제</button>
           </div>
         </ModalOverlay>
@@ -270,6 +412,33 @@ export default function EmployeesPage() {
             </button>
           </div>
           {pwMsg && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, padding: 10, color: '#dc2626', fontSize: 13 }}>{pwMsg}</div>}
+        </ModalOverlay>
+      )}
+
+      {/* Leave modal */}
+      {leaveModal && (
+        <ModalOverlay onClose={() => setLeaveModal(null)}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <h3 style={{ fontSize: 17, fontWeight: 700 }}>휴직 처리</h3>
+            <button onClick={() => setLeaveModal(null)} style={closeBtn}>✕</button>
+          </div>
+          <p style={{ color: '#374151', fontSize: 14, marginBottom: 20 }}>
+            <strong>{leaveModal.성명}</strong> ({leaveModal.사번}) 님의 휴직 기간을 입력해주세요.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+            <div>
+              <label style={labelS}>휴직 시작일</label>
+              <input type="date" value={leaveStart} onChange={e => setLeaveStart(e.target.value)} style={inputS} />
+            </div>
+            <div>
+              <label style={labelS}>휴직 종료일</label>
+              <input type="date" value={leaveEnd} onChange={e => setLeaveEnd(e.target.value)} style={inputS} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={handleLeave} style={{ ...btnAction, background: '#f59e0b' }}>휴직 처리</button>
+            <button onClick={() => setLeaveModal(null)} style={{ ...btnAction, background: '#6b7280' }}>취소</button>
+          </div>
         </ModalOverlay>
       )}
 
@@ -307,3 +476,5 @@ const btnAction: React.CSSProperties = { color: '#fff', border: 'none', borderRa
 const closeBtn: React.CSSProperties = { background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280' }
 const labelS: React.CSSProperties = { display: 'block', fontWeight: 600, marginBottom: 5, fontSize: 13, color: '#374151' }
 const inputS: React.CSSProperties = { width: '100%', border: '1px solid #d1d5db', borderRadius: 8, padding: '9px 12px', fontSize: 13, outline: 'none', boxSizing: 'border-box' }
+const statsCardStyle: React.CSSProperties = { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '20px 24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }
+const filterSelectStyle: React.CSSProperties = { border: '1px solid #d1d5db', borderRadius: 8, padding: '10px 14px', fontSize: 14, background: '#fff', cursor: 'pointer', outline: 'none', minWidth: 120 }

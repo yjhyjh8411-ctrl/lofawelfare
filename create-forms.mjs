@@ -91,8 +91,8 @@ const forms = [
     grouped: false,
     fields: [
       { id: 'category', label: '지원 구분', type: 'select', required: true, sensitive: false, options: ['학원비', '수강료', '도서구입', '건강검진', '기타'] },
-      { id: 'purpose', label: '신청내용', type: 'textarea', required: true, sensitive: false },
-      { id: 'amount', label: '신청금액', type: 'number', required: true, sensitive: false },
+      { id: 'living_detail', label: '생활복지 사용내역', type: 'living_records', required: true, sensitive: false },
+      { id: 'purpose', label: '신청내용 (추가설명)', type: 'textarea', required: false, sensitive: false },
       ...commonAccountFields,
     ]
   },
@@ -107,9 +107,9 @@ const forms = [
     order: 5,
     grouped: false,
     fields: [
-      { id: 'activity', label: '활동 내용', type: 'select', required: true, sensitive: false, options: ['공연/콘서트', '영화', '전시/미술관', '스포츠관람', '여행', '가족행사', '기타'] },
-      { id: 'detail', label: '상세 내용', type: 'textarea', required: true, sensitive: false },
-      { id: 'amount', label: '신청금액', type: 'number', required: true, sensitive: false },
+      { id: 'activity', label: '활동 구분', type: 'select', required: true, sensitive: false, options: ['공연/콘서트', '영화', '전시/미술관', '스포츠관람', '여행', '가족행사', '기타'] },
+      { id: 'cultural_detail', label: '문화활동 사용내역', type: 'cultural_records', required: true, sensitive: false },
+      { id: 'detail', label: '상세 내용 (추가설명)', type: 'textarea', required: false, sensitive: false },
       ...commonAccountFields,
     ]
   },

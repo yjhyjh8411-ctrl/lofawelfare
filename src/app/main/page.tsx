@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useState, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { collection, getDocs, query, where, orderBy, getDoc, doc, updateDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/lib/auth-context'
@@ -16,6 +16,7 @@ interface FormConfig {
   color?: string
   isActive: boolean
   order: number
+  periods?: { year: number; start: string; end: string }[]
 }
 
 interface Application {
@@ -37,18 +38,28 @@ interface BudgetGroup {
 }
 
 export default function MainPage() {
+  return <Suspense fallback={null}><MainPageInner /></Suspense>
+}
+
+function MainPageInner() {
   const { user, profile, loading } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const isPreview = searchParams.get('preview') === '1'
   const [forms, setForms] = useState<FormConfig[]>([])
   const [myApps, setMyApps] = useState<Application[]>([])
   const [approvedByForm, setApprovedByForm] = useState<Record<string, number>>({})
   const [announcement, setAnnouncement] = useState('')
+  const [popupNotice, setPopupNotice] = useState<{ 제목: string; 내용: string; 시작일: string; 종료일: string; 활성: boolean } | null>(null)
+  const [showPopup, setShowPopup] = useState(false)
   const [regulations, setRegulations] = useState<{ id: string; 버전명: string; files: { name: string; url: string }[] }[]>([])
   const [budgetGroups, setBudgetGroups] = useState<BudgetGroup[]>([])
+  const [alertMsg, setAlertMsg] = useState('')
 
   useEffect(() => {
     if (!loading && !user) router.replace('/login')
-  }, [user, loading, router])
+    if (!loading && profile?.isAdmin && !isPreview) router.replace('/admin')
+  }, [user, profile, loading, router, isPreview])
 
   useEffect(() => {
     if (!user) return
@@ -98,9 +109,23 @@ export default function MainPage() {
         })
         setApprovedByForm(byForm)
 
-        // Announcement
+        // Announcement + Popup notice
         const settingsDoc = await getDoc(doc(db, 'settings', 'global'))
-        if (settingsDoc.exists()) setAnnouncement(settingsDoc.data()?.공지사항 || '')
+        if (settingsDoc.exists()) {
+          setAnnouncement(settingsDoc.data()?.공지사항 || '')
+          const popup = settingsDoc.data()?.팝업공지
+          if (popup?.활성 && popup.시작일 && popup.종료일) {
+            const today = new Date().toISOString().slice(0, 10)
+            if (today >= popup.시작일 && today <= popup.종료일) {
+              const dismissKey = `popup_dismissed_${popup.시작일}_${popup.종료일}`
+              const dismissed = localStorage.getItem(dismissKey)
+              if (!dismissed || Date.now() - Number(dismissed) > 24 * 60 * 60 * 1000) {
+                setPopupNotice(popup)
+                setShowPopup(true)
+              }
+            }
+          }
+        }
 
         // Regulations
         try {
@@ -137,6 +162,45 @@ export default function MainPage() {
   return (
     <div style={{ minHeight: '100vh', background: '#f8f9fa', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
       <Navbar />
+      {alertMsg && (
+        <div style={{ position: 'fixed', top: 72, left: '50%', transform: 'translateX(-50%)', background: '#dc2626', color: '#fff', padding: '12px 28px', borderRadius: 10, zIndex: 9999, fontWeight: 600, fontSize: 14, boxShadow: '0 4px 16px rgba(0,0,0,0.15)', whiteSpace: 'nowrap' }}>
+          {alertMsg}
+        </div>
+      )}
+
+      {/* Popup Notice Modal */}
+      {showPopup && popupNotice && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 32, width: 480, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+            <h2 style={{ fontSize: 20, fontWeight: 800, color: '#111827', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 24 }}>📢</span> {popupNotice.제목}
+            </h2>
+            <p style={{ fontSize: 14, color: '#374151', lineHeight: 1.8, whiteSpace: 'pre-wrap', marginBottom: 24 }}>
+              {popupNotice.내용}
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: '#6b7280' }}>
+                <input
+                  type="checkbox"
+                  onChange={e => {
+                    if (e.target.checked && popupNotice) {
+                      const dismissKey = `popup_dismissed_${popupNotice.시작일}_${popupNotice.종료일}`
+                      localStorage.setItem(dismissKey, String(Date.now()))
+                    }
+                  }}
+                />
+                오늘 하루 안 보기
+              </label>
+              <button
+                onClick={() => setShowPopup(false)}
+                style={{ background: '#1a56db', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 28px', fontWeight: 600, fontSize: 14, cursor: 'pointer' }}
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 20px 60px' }}>
 
@@ -239,11 +303,31 @@ export default function MainPage() {
             {forms.map(f => {
               const approved = approvedByForm[f.id] || 0
               const iconColor = f.color || '#4285f4'
+              const now = new Date().toISOString().slice(0, 10)
+              const periods = f.periods || []
+              const activePeriod = periods.find(p => p.start && p.end && now >= p.start && now <= p.end)
+              const nextPeriod = periods.filter(p => p.start && now < p.start).sort((a, b) => a.start.localeCompare(b.start))[0]
+              const isInPeriod = !!activePeriod
+              const hasPeriods = periods.length > 0
+
+              const handleClick = () => {
+                if (hasPeriods && !isInPeriod) {
+                  if (nextPeriod) {
+                    setAlertMsg(`현재 신청기간이 아닙니다. 다음 신청기간: ${nextPeriod.start} ~ ${nextPeriod.end}`)
+                  } else {
+                    setAlertMsg('현재 신청기간이 아닙니다.')
+                  }
+                  setTimeout(() => setAlertMsg(''), 3000)
+                  return
+                }
+                router.push(`/apply/_/?formId=${f.id}`)
+              }
+
               return (
                 <div
                   key={f.id}
-                  onClick={() => router.push(`/apply/${f.id}`)}
-                  style={{ ...card, padding: '18px 20px', cursor: 'pointer', transition: 'box-shadow 0.15s, transform 0.15s' }}
+                  onClick={handleClick}
+                  style={{ ...card, padding: '18px 20px', cursor: 'pointer', transition: 'box-shadow 0.15s, transform 0.15s', opacity: hasPeriods && !isInPeriod ? 0.6 : 1 }}
                   onMouseEnter={e => {
                     (e.currentTarget as HTMLDivElement).style.boxShadow = '0 6px 20px rgba(0,0,0,0.1)'
                     ;(e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)'
@@ -253,8 +337,25 @@ export default function MainPage() {
                     ;(e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)'
                   }}
                 >
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: `${iconColor}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, marginBottom: 12 }}>
-                    {f.icon || '📋'}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: `${iconColor}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+                      {f.icon || '📋'}
+                    </div>
+                    {hasPeriods && (
+                      <div style={{ fontSize: 11, marginTop: 4, lineHeight: 1.4 }}>
+                        {activePeriod ? (
+                          <span style={{ color: '#059669', fontWeight: 600 }}>
+                            신청기간: {activePeriod.start.slice(5).replace('-','/')} ~ {activePeriod.end.slice(5).replace('-','/')}
+                          </span>
+                        ) : nextPeriod ? (
+                          <span style={{ color: '#f59e0b', fontWeight: 600 }}>
+                            다음 신청: {nextPeriod.start.slice(5).replace('-','/')} ~ {nextPeriod.end.slice(5).replace('-','/')}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#dc2626', fontWeight: 600 }}>신청 마감</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>{f.제목}</div>
                   <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 14, lineHeight: 1.5 }}>{f.설명}</div>

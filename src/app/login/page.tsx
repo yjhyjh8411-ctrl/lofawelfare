@@ -3,31 +3,8 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth'
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore'
+import { doc, getDoc } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase'
-
-/* ── Stamp text: each character slams in one by one ── */
-function StampText({ text, delay, fontSize, color, letterSpacing }: {
-  text: string; delay: number; fontSize: number; color: string; letterSpacing: number
-}) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'center', gap: letterSpacing }}>
-      {text.split('').map((char, i) => (
-        <span
-          key={i}
-          style={{
-            display: 'inline-block',
-            fontSize, fontWeight: 900, color,
-            textShadow: '0 2px 20px rgba(0,0,0,0.8), 0 0 40px rgba(255,255,255,0.15)',
-            animation: `stamp-in 0.25s cubic-bezier(0.22, 0.68, 0, 1.3) ${delay + i * 0.08}s both`,
-          }}
-        >
-          {char}
-        </span>
-      ))}
-    </div>
-  )
-}
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -44,9 +21,8 @@ export default function LoginPage() {
     try {
       const cred = await signInWithEmailAndPassword(auth, email, password)
       const ud = await getDoc(doc(db, 'users', cred.user.uid))
-      router.push(ud.exists() && ud.data()?.role === 'admin' ? '/admin' : '/main')
+      router.push(ud.exists() && (ud.data()?.role === 'admin' || ud.data()?.isAdmin) ? '/admin' : '/main')
     } catch {
-      // 입력한 이메일로 직접 로그인 실패 → 회사이메일/구글이메일로 등록된 계정 찾기
       try {
         const res = await fetch('/api/lookup-email', {
           method: 'POST',
@@ -71,7 +47,7 @@ export default function LoginPage() {
     try {
       const result = await signInWithPopup(auth, new GoogleAuthProvider())
       const userDoc = await getDoc(doc(db, 'users', result.user.uid))
-      const dest = !userDoc.exists() ? '/complete-profile' : userDoc.data()?.role === 'admin' ? '/admin' : '/main'
+      const dest = !userDoc.exists() ? '/complete-profile' : (userDoc.data()?.role === 'admin' || userDoc.data()?.isAdmin) ? '/admin' : '/main'
       router.push(dest)
     } catch (err: unknown) {
       const code = err && typeof err === 'object' && 'code' in err ? (err as { code: string }).code : ''
@@ -83,144 +59,108 @@ export default function LoginPage() {
   }
 
   return (
-    <>
-      <div style={{ display: 'flex', minHeight: '100vh', background: '#0a0a0f', position: 'relative', zIndex: 1 }}>
-
-        {/* ── Left: Spline 3D robot + particles ── */}
-        <div style={{
-          flex: 1, position: 'relative', overflow: 'hidden',
-          background: 'linear-gradient(135deg, #0a0a0f 0%, #0d1a2e 50%, #0a0a0f 100%)',
-          display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-        }}>
-          {/* Spline scene */}
-          <iframe
-            src="/spline-robot.html"
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none', zIndex: 1 }}
-            allow="autoplay"
-          />
-
-          {/* Stamp text on robot chest */}
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    }}>
+      <div style={{
+        width: 420, background: '#fff', borderRadius: 16,
+        boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+        padding: '48px 40px',
+      }}>
+        {/* Header */}
+        <div style={{ textAlign: 'center', marginBottom: 36 }}>
           <div style={{
-            position: 'absolute', top: '50%', left: '50%',
-            transform: 'translate(-50%, -50%)',
-            zIndex: 5, pointerEvents: 'none',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+            width: 56, height: 56, borderRadius: '50%', background: '#1a56db',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            margin: '0 auto 16px', color: '#fff', fontSize: 24, fontWeight: 800,
           }}>
-            <StampText text="한국지방재정공제회" delay={1.0} fontSize={22} color="#fff" letterSpacing={1} />
-            <StampText text="사내복지기금 시스템" delay={1.8} fontSize={14} color="rgba(255,255,255,0.85)" letterSpacing={3} />
+            W
           </div>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: '#111827', marginBottom: 4 }}>
+            한국지방재정공제회
+          </h1>
+          <p style={{ color: '#6b7280', fontSize: 14 }}>사내근로복지기금 시스템</p>
         </div>
 
-        {/* ── Right: Login form ── */}
-        <div style={{
-          width: 440, flexShrink: 0,
-          background: '#fff',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '40px 48px',
-        }}>
-          <div style={{ width: '100%' }}>
-            {/* LOFA Header */}
-            <div style={{ textAlign: 'center', marginBottom: 32 }}>
-              <h1 style={{ fontSize: 42, fontWeight: 900, color: '#e8922a', letterSpacing: 2, marginBottom: 6 }}>
-                LOFA
-              </h1>
-              <p style={{ color: '#6b7280', fontSize: 14, marginBottom: 12 }}>사내근로복지기금 시스템</p>
-              <div style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                background: '#f3f4f6', borderRadius: 20, padding: '5px 14px',
-                border: '1px solid #e5e7eb',
-              }}>
-                <span style={{ fontSize: 13, color: '#e8922a' }}>🛡️</span>
-                <span style={{ fontSize: 12, color: '#6b7280', fontWeight: 500 }}>한국지방재정공제회</span>
-              </div>
-            </div>
-
-            <form onSubmit={handleLogin}>
-              <div style={{ marginBottom: 14 }}>
-                <input
-                  type="email" value={email} onChange={e => setEmail(e.target.value)}
-                  placeholder="이메일 주소"
-                  style={{
-                    width: '100%', background: '#f8f9fa',
-                    border: '1.5px solid #e5e7eb', borderRadius: 10,
-                    padding: '13px 15px', fontSize: 14, color: '#0d0d0d', outline: 'none',
-                    boxSizing: 'border-box', transition: 'border-color 0.2s',
-                  }}
-                  onFocus={e => e.target.style.borderColor = '#4285f4'}
-                  onBlur={e => e.target.style.borderColor = '#e5e7eb'}
-                />
-              </div>
-              <div style={{ marginBottom: 22 }}>
-                <input
-                  type="password" value={password} onChange={e => setPassword(e.target.value)}
-                  placeholder="비밀번호"
-                  style={{
-                    width: '100%', background: '#f8f9fa',
-                    border: '1.5px solid #e5e7eb', borderRadius: 10,
-                    padding: '13px 15px', fontSize: 14, color: '#0d0d0d', outline: 'none',
-                    boxSizing: 'border-box', transition: 'border-color 0.2s',
-                  }}
-                  onFocus={e => e.target.style.borderColor = '#4285f4'}
-                  onBlur={e => e.target.style.borderColor = '#e5e7eb'}
-                />
-              </div>
-              
-              {error && (
-                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 12px', color: '#dc2626', fontSize: 13, marginBottom: 16 }}>
-                  {error}
-                </div>
-              )}
-
-              <button
-                type="submit" disabled={loading}
-                style={{
-                  width: '100%', background: loading ? '#6b7280' : '#0d0d0d',
-                  color: '#fff', border: 'none', borderRadius: 10,
-                  padding: '14px', fontSize: 15, fontWeight: 700,
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.2s', letterSpacing: -0.2,
-                }}
-              >
-                {loading ? '로그인 중...' : '로그인 →'}
-              </button>
-            </form>
-
-            <div style={{ display: 'flex', alignItems: 'center', margin: '20px 0' }}>
-              <div style={{ flex: 1, height: 1, background: '#e5e7eb' }} />
-              <span style={{ margin: '0 12px', color: '#9ca3af', fontSize: 12 }}>또는</span>
-              <div style={{ flex: 1, height: 1, background: '#e5e7eb' }} />
-            </div>
-
-            <button
-              onClick={handleGoogleLogin} disabled={googleLoading}
-              style={{
-                width: '100%', background: '#fff', color: '#374151',
-                border: '1.5px solid #e5e7eb', borderRadius: 10,
-                padding: '13px', fontSize: 14, fontWeight: 500,
-                cursor: googleLoading ? 'not-allowed' : 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                opacity: googleLoading ? 0.6 : 1, transition: 'all 0.2s',
-              }}
-              onMouseEnter={e => (e.currentTarget.style.borderColor = '#4285f4')}
-              onMouseLeave={e => (e.currentTarget.style.borderColor = '#e5e7eb')}
-            >
-              <GoogleIcon />
-              {googleLoading ? 'Google 계정으로 로그인' : 'Google 계정으로 로그인'}
-            </button>
-
-            <div style={{ textAlign: 'center', marginTop: 24 }}>
-              <span style={{ color: '#9ca3af', fontSize: 13 }}>계정이 없으신가요? </span>
-              <button
-                onClick={() => router.push('/signup')}
-                style={{ background: 'none', border: 'none', color: '#4285f4', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
-              >
-                회원가입
-              </button>
-            </div>
+        <form onSubmit={handleLogin}>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>이메일</label>
+            <input
+              type="email" value={email} onChange={e => setEmail(e.target.value)}
+              placeholder="이메일 주소를 입력하세요"
+              style={inputStyle}
+              onFocus={e => e.target.style.borderColor = '#1a56db'}
+              onBlur={e => e.target.style.borderColor = '#d1d5db'}
+            />
           </div>
+          <div style={{ marginBottom: 24 }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>비밀번호</label>
+            <input
+              type="password" value={password} onChange={e => setPassword(e.target.value)}
+              placeholder="비밀번호를 입력하세요"
+              style={inputStyle}
+              onFocus={e => e.target.style.borderColor = '#1a56db'}
+              onBlur={e => e.target.style.borderColor = '#d1d5db'}
+            />
+          </div>
+
+          {error && (
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', color: '#dc2626', fontSize: 13, marginBottom: 16 }}>
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit" disabled={loading}
+            style={{
+              width: '100%', background: loading ? '#9ca3af' : '#1a56db',
+              color: '#fff', border: 'none', borderRadius: 10,
+              padding: '14px', fontSize: 15, fontWeight: 700,
+              cursor: loading ? 'not-allowed' : 'pointer',
+              transition: 'background 0.2s',
+            }}
+          >
+            {loading ? '로그인 중...' : '로그인'}
+          </button>
+        </form>
+
+        <div style={{ display: 'flex', alignItems: 'center', margin: '20px 0' }}>
+          <div style={{ flex: 1, height: 1, background: '#e5e7eb' }} />
+          <span style={{ margin: '0 12px', color: '#9ca3af', fontSize: 12 }}>또는</span>
+          <div style={{ flex: 1, height: 1, background: '#e5e7eb' }} />
+        </div>
+
+        <button
+          onClick={handleGoogleLogin} disabled={googleLoading}
+          style={{
+            width: '100%', background: '#fff', color: '#374151',
+            border: '1.5px solid #e5e7eb', borderRadius: 10,
+            padding: '13px', fontSize: 14, fontWeight: 500,
+            cursor: googleLoading ? 'not-allowed' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            opacity: googleLoading ? 0.6 : 1, transition: 'all 0.2s',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.borderColor = '#1a56db')}
+          onMouseLeave={e => (e.currentTarget.style.borderColor = '#e5e7eb')}
+        >
+          <GoogleIcon />
+          Google 계정으로 로그인
+        </button>
+
+        <div style={{ textAlign: 'center', marginTop: 24 }}>
+          <span style={{ color: '#9ca3af', fontSize: 13 }}>계정이 없으신가요? </span>
+          <button
+            onClick={() => router.push('/signup')}
+            style={{ background: 'none', border: 'none', color: '#1a56db', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+          >
+            회원가입
+          </button>
         </div>
       </div>
-    </>
+    </div>
   )
 }
 
@@ -233,4 +173,11 @@ function GoogleIcon() {
       <path fill="#EA4335" d="M9 3.583c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.163 6.656 3.583 9 3.583z"/>
     </svg>
   )
+}
+
+const inputStyle: React.CSSProperties = {
+  width: '100%', background: '#f9fafb',
+  border: '1.5px solid #d1d5db', borderRadius: 10,
+  padding: '12px 14px', fontSize: 14, color: '#111827', outline: 'none',
+  boxSizing: 'border-box', transition: 'border-color 0.2s',
 }
