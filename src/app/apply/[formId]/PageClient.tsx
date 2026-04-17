@@ -56,7 +56,7 @@ const PRIVACY_TEXT = `한국지방재정공제회 사내근로복지기금 지�
 • 본 시스템상 전자적 방법(전자결재 등)으로 모든 서류 제출이 가능합니다. (제70조)`
 
 function getEmptyRow(type: string): Record<string, string> {
-  if (type === 'medical_records') return { 기관: '', 일자: '', 금액: '' }
+  if (type === 'medical_records') return { 대상자: '', 기관: '', 일자: '', 금액: '' }
   if (type === 'scholarship_records') return { 성명: '', 관계: '자녀', 학교급학년: '', 금액: '' }
   if (type === 'children_records') return { 성명: '', 생년월일: '', 비고: '' }
   if (type === 'living_records') return { 사용처: '', 사용일자: '', 금액: '' }
@@ -283,7 +283,7 @@ export default function ApplyPage() {
   const renderField = (field: FormField) => {
     switch (field.type) {
       case 'medical_records': {
-        const rows = dynRows[field.id] || [{ 기관: '', 일자: '', 금액: '' }]
+        const rows = dynRows[field.id] || [{ 대상자: '', 기관: '', 일자: '', 금액: '' }]
         const total = rows.reduce((s, r) => s + (parseInt(r.금액) || 0), 0)
         return (
           <div key={field.id}>
@@ -291,19 +291,20 @@ export default function ApplyPage() {
               <button type="button" onClick={() => addRow(field.id, field.type)} style={addRowBtn}>+ 내역 추가</button>
             </div>
             <div style={tblWrap}>
-              <div style={{ ...tblHead, gridTemplateColumns: '1fr 140px 110px 32px' }}>
-                <span>진료기관</span><span>진료일자</span><span>금액</span><span></span>
+              <div style={{ ...tblHead, gridTemplateColumns: '110px 1fr 140px 110px 32px' }}>
+                <span>대상자</span><span>진료기관</span><span>진료일자</span><span>금액</span><span></span>
               </div>
               {rows.map((row, i) => (
-                <div key={i} style={{ ...tblRow, gridTemplateColumns: '1fr 140px 110px 32px' }}>
+                <div key={i} style={{ ...tblRow, gridTemplateColumns: '110px 1fr 140px 110px 32px' }}>
+                  <input type="text" value={row.대상자 || ''} placeholder="성명" onChange={e => updateRow(field.id, i, '대상자', e.target.value)} style={cellInput} />
                   <input type="text" value={row.기관} placeholder="기관명" onChange={e => updateRow(field.id, i, '기관', e.target.value)} style={cellInput} />
                   <input type="date" value={row.일자} onChange={e => updateRow(field.id, i, '일자', e.target.value)} style={cellInput} />
                   <input type="number" value={row.금액} placeholder="0" min="0" onChange={e => updateRow(field.id, i, '금액', e.target.value)} style={{ ...cellInput, textAlign: 'right' }} />
                   <button type="button" onClick={() => removeRow(field.id, i)} disabled={rows.length <= 1} style={delRowBtn(rows.length > 1)}>×</button>
                 </div>
               ))}
-              <div style={{ ...tblRow, gridTemplateColumns: '1fr 140px 110px 32px', background: '#f9fafb', fontWeight: 700 }}>
-                <span style={{ gridColumn: '1/3', fontSize: 13 }}>총 합계</span>
+              <div style={{ ...tblRow, gridTemplateColumns: '110px 1fr 140px 110px 32px', background: '#f9fafb', fontWeight: 700 }}>
+                <span style={{ gridColumn: '1/4', fontSize: 13 }}>총 합계</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#1a56db' }}>
                   <span style={{ fontSize: 12, fontWeight: 400, color: '#6b7280' }}>₩</span>{total.toLocaleString()}<span style={{ fontSize: 12, fontWeight: 400, color: '#6b7280' }}>원</span>
                 </div>
