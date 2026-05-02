@@ -2,6 +2,7 @@
 
 import type { Application } from '../types'
 import { statusInfo } from '../utils'
+import { ScreenPanel } from './ScreenBadge'
 
 // Shared styles
 const btnAction: React.CSSProperties = { color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }
@@ -48,6 +49,7 @@ export function DetailModal({ app, decryptedValues, onClose, onApprove, onReject
           {app.created_at?.toDate && ` · ${app.created_at.toDate!().toLocaleDateString('ko-KR')}`}
         </p>
       </div>
+      <ScreenPanel result={app.screen} />
       {app.data && Object.entries(app.data).map(([k, v]) => {
         let fileInfo: { url: string; name: string; size?: number } | null = null
         if (v && typeof v === 'object' && !Array.isArray(v)) {

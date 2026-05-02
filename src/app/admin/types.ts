@@ -1,3 +1,5 @@
+import type { ScreenResult } from '@/lib/auto-screen'
+
 export interface Application {
   id: string
   form_id: string
@@ -8,6 +10,8 @@ export interface Application {
   data?: Record<string, unknown>
   reject_reason?: string
   formTitle?: string
+  /** 자동 사전심사 결과 — 클라이언트에서 계산되어 첨부됨 */
+  screen?: ScreenResult
 }
 
 export interface UserDoc {
@@ -35,4 +39,18 @@ export interface FormConfig {
   제목: string
   isActive: boolean
   order: number
+  fields?: unknown[]
+  periods?: { year: number; start: string; end: string }[]
+  대부동의필요?: boolean
+  무주택서약필요?: boolean
+  무주택서약조건필드ID?: string
+  무주택서약조건값들?: string[]
+}
+
+export interface BudgetGroup {
+  id: string
+  name: string
+  limitAmount: number
+  period: 'annual' | 'monthly'
+  formIds: string[]
 }

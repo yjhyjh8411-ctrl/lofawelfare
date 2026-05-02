@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   collection, getDocs, doc, updateDoc, deleteDoc, addDoc, orderBy, query,
-  setDoc, getDoc, serverTimestamp,
+  setDoc, getDoc, serverTimestamp, writeBatch,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/lib/auth-context'
@@ -52,6 +52,10 @@ export default function AdminFormsPage() {
   const [groupModalOpen, setGroupModalOpen] = useState(false)
   const [groupData, setGroupData] = useState<Omit<BudgetGroup, 'id'>>(emptyGroup())
   const [groupSaving, setGroupSaving] = useState(false)
+
+  // Drag and drop
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
 
   useEffect(() => {
     if (!loading && !profile?.isAdmin) router.replace('/main')
@@ -152,6 +156,53 @@ export default function AdminFormsPage() {
     setGroups(prev => prev.filter(g => g.id !== groupModal.id))
     setGroupModalOpen(false)
     showMsg('그룹이 삭제되었습니다.')
+  }
+
+  const moveForm = async (idx: number, dir: -1 | 1) => {
+    const target = idx + dir
+    if (target < 0 || target >= forms.length) return
+    const a = forms[idx]
+    const b = forms[target]
+    const reordered = [...forms]
+    reordered[idx] = b
+    reordered[target] = a
+    const renumbered = reordered.map((f, i) => ({ ...f, order: i + 1 }))
+    setForms(renumbered)
+    const batch = writeBatch(db)
+    batch.update(doc(db, 'form_configs', a.id), { order: renumbered.findIndex(x => x.id === a.id) + 1 })
+    batch.update(doc(db, 'form_configs', b.id), { order: renumbered.findIndex(x => x.id === b.id) + 1 })
+    await batch.commit()
+  }
+
+  const reorderForms = async (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= forms.length || to >= forms.length) return
+    const reordered = [...forms]
+    const [moved] = reordered.splice(from, 1)
+    reordered.splice(to, 0, moved)
+    const renumbered = reordered.map((f, i) => ({ ...f, order: i + 1 }))
+    setForms(renumbered)
+    const batch = writeBatch(db)
+    renumbered.forEach((f, i) => batch.update(doc(db, 'form_configs', f.id), { order: i + 1 }))
+    await batch.commit()
+    showMsg('순서가 저장되었습니다.')
+  }
+
+  const handleFormDragStart = (idx: number) => (e: React.DragEvent) => {
+    setDragIdx(idx)
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+  }
+  const handleFormDragOver = (idx: number) => (e: React.DragEvent) => {
+    e.preventDefault()
+    if (dragIdx !== null && idx !== dragIdx) setDragOverIdx(idx)
+  }
+  const handleFormDrop = (idx: number) => () => {
+    if (dragIdx !== null) reorderForms(dragIdx, idx)
+    setDragIdx(null)
+    setDragOverIdx(null)
+  }
+  const handleFormDragEnd = () => {
+    setDragIdx(null)
+    setDragOverIdx(null)
   }
 
   const updateFormPeriods = async (formId: string, periods: { year: number; start: string; end: string }[]) => {
@@ -265,18 +316,73 @@ export default function AdminFormsPage() {
         )}
 
         {/* Forms list */}
+        {forms.length > 0 && (
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+            ⋮⋮ 좌측 핸들을 드래그하거나 ▲▼ 버튼으로 사용자 메인 화면의 카드 노출 순서를 변경할 수 있습니다.
+          </div>
+        )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 36 }}>
-          {forms.map(f => {
+          {forms.map((f, fIdx) => {
             const currentYear = new Date().getFullYear()
             const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - 1 + i)
+            const isFirst = fIdx === 0
+            const isLast = fIdx === forms.length - 1
             return (
-              <div key={f.id} style={{
-                background: '#fff', borderRadius: 10, padding: '16px 20px',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                opacity: f.isActive ? 1 : 0.65,
-              }}>
+              <div
+                key={f.id}
+                draggable
+                onDragStart={handleFormDragStart(fIdx)}
+                onDragOver={handleFormDragOver(fIdx)}
+                onDrop={handleFormDrop(fIdx)}
+                onDragEnd={handleFormDragEnd}
+                style={{
+                  background: '#fff',
+                  borderRadius: 10,
+                  padding: '16px 20px',
+                  boxShadow: dragOverIdx === fIdx ? '0 0 0 2px #1a56db' : '0 1px 3px rgba(0,0,0,0.06)',
+                  opacity: dragIdx === fIdx ? 0.4 : (f.isActive ? 1 : 0.65),
+                  transition: 'box-shadow 0.15s, opacity 0.15s',
+                }}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div
+                      style={{ cursor: 'grab', color: '#9ca3af', fontSize: 14, padding: '4px 2px', userSelect: 'none', lineHeight: 1, fontWeight: 700, letterSpacing: -1 }}
+                      title="드래그하여 순서 변경"
+                    >⋮⋮</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <button
+                        onClick={() => moveForm(fIdx, -1)}
+                        disabled={isFirst}
+                        title="위로 이동"
+                        style={{
+                          background: isFirst ? '#f3f4f6' : '#fff',
+                          border: '1px solid #d1d5db',
+                          borderRadius: 4,
+                          padding: '2px 6px',
+                          fontSize: 11,
+                          color: isFirst ? '#d1d5db' : '#374151',
+                          cursor: isFirst ? 'not-allowed' : 'pointer',
+                          lineHeight: 1,
+                        }}
+                      >▲</button>
+                      <button
+                        onClick={() => moveForm(fIdx, 1)}
+                        disabled={isLast}
+                        title="아래로 이동"
+                        style={{
+                          background: isLast ? '#f3f4f6' : '#fff',
+                          border: '1px solid #d1d5db',
+                          borderRadius: 4,
+                          padding: '2px 6px',
+                          fontSize: 11,
+                          color: isLast ? '#d1d5db' : '#374151',
+                          cursor: isLast ? 'not-allowed' : 'pointer',
+                          lineHeight: 1,
+                        }}
+                      >▼</button>
+                    </div>
+                    <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 700, minWidth: 20, textAlign: 'center' }}>{fIdx + 1}</span>
                     {f.icon && <span style={{ fontSize: 22 }}>{f.icon}</span>}
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 15, color: '#111827' }}>{f.제목}</div>

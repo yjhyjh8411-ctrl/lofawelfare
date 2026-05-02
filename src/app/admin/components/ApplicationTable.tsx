@@ -2,6 +2,7 @@
 
 import type { Application, FormConfig } from '../types'
 import { statusInfo } from '../utils'
+import { ScreenBadge } from './ScreenBadge'
 
 interface ApplicationTableProps {
   apps: Application[]
@@ -66,14 +67,14 @@ export default function ApplicationTable({
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
               <tr style={{ background: '#f9fafb' }}>
-                {['사번', '성명', '부서', '신청항목', '신청일', '상태', '관리'].map(h => (
+                {['사번', '성명', '부서', '신청항목', '신청일', '상태', '자동심사', '관리'].map(h => (
                   <th key={h} style={{ padding: '11px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', borderBottom: '2px solid #e5e7eb', whiteSpace: 'nowrap', fontSize: 12 }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {apps.length === 0 ? (
-                <tr><td colSpan={7} style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>신청 내역이 없습니다.</td></tr>
+                <tr><td colSpan={8} style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>신청 내역이 없습니다.</td></tr>
               ) : apps.map((app, idx) => {
                 const date = app.created_at?.toDate?.()
                 const si = statusInfo(app.status)
@@ -94,6 +95,9 @@ export default function ApplicationTable({
                     <td style={{ padding: '11px 14px', color: '#6b7280', whiteSpace: 'nowrap' }}>{date?.toLocaleDateString('ko-KR')}</td>
                     <td style={{ padding: '11px 14px' }}>
                       <span style={{ background: si.bg, color: si.color, padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{si.text}</span>
+                    </td>
+                    <td style={{ padding: '11px 14px' }}>
+                      <ScreenBadge result={app.screen} />
                     </td>
                     <td style={{ padding: '11px 14px' }}>
                       {app.status === 'pending' && (

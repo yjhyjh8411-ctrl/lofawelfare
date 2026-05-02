@@ -359,14 +359,17 @@ function MainPageInner() {
                   </div>
                   <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>{f.제목}</div>
                   <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 14, lineHeight: 1.5 }}>{f.설명}</div>
-                  <div style={{ borderTop: '1px solid #f3f4f6', paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                  <div style={{ borderTop: '1px solid #f3f4f6', paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12 }}>
                     <div>
                       <div style={{ fontSize: 10, color: '#9ca3af', marginBottom: 2 }}>올해 승인</div>
                       <div style={{ fontSize: 14, fontWeight: 700, color: approved > 0 ? '#4285f4' : '#9ca3af' }}>{approved.toLocaleString()}원</div>
                     </div>
-                    {f.한도설명 && (
-                      <div style={{ fontSize: 10, color: '#9ca3af', textAlign: 'right', maxWidth: 90, lineHeight: 1.4 }}>
-                        한도: {f.한도설명}
+                    {typeof f.한도설명 === 'string' && f.한도설명 && (
+                      <div style={{ textAlign: 'right', minWidth: 0, flex: '0 1 auto' }}>
+                        <div style={{ fontSize: 10, color: '#4285f4', fontWeight: 700, marginBottom: 2, letterSpacing: 0.3 }}>한도</div>
+                        {String(f.한도설명).split('\n').slice(0, 2).map((line, idx) => (
+                          <div key={idx} style={{ fontSize: 11, color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 150, lineHeight: 1.45 }} title={line}>{line}</div>
+                        ))}
                       </div>
                     )}
                   </div>

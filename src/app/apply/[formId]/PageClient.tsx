@@ -8,7 +8,7 @@ import { db, storage } from '@/lib/firebase'
 import { useAuth } from '@/lib/auth-context'
 
 type FieldType = 'text' | 'number' | 'amount' | 'date' | 'select' | 'textarea' | 'file'
-  | 'account' | 'radio' | 'medical_records' | 'scholarship_records' | 'children_records' | 'loan_agreement'
+  | 'account' | 'radio' | 'medical_records' | 'scholarship_records' | 'children_records' | 'loan_agreement' | 'housing_agreement'
   | 'living_records' | 'cultural_records' | 'vaccination_records'
 
 interface FormField {
@@ -26,6 +26,11 @@ interface FormConfig {
   제목: string
   설명: string
   한도설명?: string
+  신청내용주석?: string
+  대부동의필요?: boolean
+  무주택서약필요?: boolean
+  무주택서약조건필드ID?: string
+  무주택서약조건값들?: string[]
   fields: FormField[]
   icon?: string
 }
@@ -33,19 +38,29 @@ interface FormConfig {
 const BANKS = ['국민은행', '신한은행', '우리은행', '하나은행', '농협은행', '기업은행', '카카오뱅크', '토스뱅크',
   '우체국', '새마을금고', '신협', '부산은행', '대구은행', '광주은행', '전북은행', '경남은행', '수협']
 
-const LOAN_TEXT = `상기 본인은 한국지방재정공제회 사내근로복지기금에서 시행하는 기금운영 규정 및 대부계획에 정해진 모든 조건을 수락하며 위 금액을 대부받으므로 다음 사항을 성실히 이행할 것에 동의합니다.
+const LOAN_TEXT = `[서식2] 대부규정 준수 및 이자비용 등 공제납부 동의서
 
-첫째, 다음과 같은 사유가 발생하였을 경우 기금법인의 요청에 따라 대부원금과 연체이자를 즉시 납부하여야 합니다.
-1. 퇴직(임기만료) 시 5영업일 전까지 대부금 전액 상환 필수 (미상환 시 퇴직금에서 우선 공제)
-2. 대부금을 신청 목적 외의 용도로 사용한 것이 적발되었을 경우
-3. 대부금 관련 제출한 서류 및 사실에 허위 기타 부정한 방법을 사용하였음이 적발된 경우
-4. 본인의 귀책사유에 의해 대부이자의 납입이 3개월 이상 연체되었을 경우 (연체이율 연 5.0% 적용)
+상기 본인은 한국지방재정공제회 사내근로복지기금에서 시행하는 기금운영규정 및 대부계획에 정해진 모든 조건을 수락하고 위 금액을 대부받았으므로 다음 사항을 성실히 이행할 것에 동의합니다.
 
-둘째, 주택자금 대부 후 2주택이 된 경우 1년 이내에 반드시 1주택을 매도하여야 하며, 미이행 시 원금 회수 및 연체이자가 부과됩니다.
+첫째, 다음과 같은 사유가 발생하였을 경우 기금법인의 요청에 따라 대부원금과 연체이자를 즉시 납부하겠음
+1. 퇴직할 경우(사망·해임·파면시 동일), 단, 이 경우에는 퇴직금 지급일로부터 5영업일까지 유예가능
+2. 대부금을 신청목적 외의 용도로 사용한 것이 적발되었을 경우
+3. 대부를 위해 제출한 서류 및 사유에 허위 기타 부정한 방법을 사용하였음이 적발된 경우
+4. 본인의 귀책사유에 의해 대부이자의 납입이 3개월 이상 연체되었을 경우
+5. 기타 기금운영규정 제8조 1항에 의거 이사회에서 대부금의 회수를 결정하였을 경우
 
-셋째, 휴직자/파면/해임/정직 중인 직원은 대부사업 신청이 제한됩니다. (제7조 1항)
+둘째, 기금운영규정에 의거 매월 급여 지급시 월이자를 급여공제하여 납부하는 것에 동의하며, 급여공제 납부가 불가한 사정이 있을시 매월 급여일까지 월간 이자를 납입하겠음
 
-넷째, 대부 단위는 100만원이며, 잔여 예산에 따라 중복 대부도 가능합니다.`
+셋째, 퇴직시 대부금 미상환액이 남아있는 경우 퇴직금에서 공제하여 납부하고 대부잔액이 퇴직금을 초과하는 경우 퇴직금 지급을 유예할 것에 동의함`
+
+const HOUSING_TEXT = `[서식3] 무주택·1주택 서약서
+
+상기 본인은 주택자금 대부를 신청함에 있어서 본인 및 부양가족 전원이 주택자금 대부신청일 기준으로 (   )년 (   )개월 전부터 무주택자(1주택자)임을 서약합니다.
+(무주택 기산일은 만 30세가 된 날 혹은 혼인신고를 한 날 중 빠른 날)
+
+만일 대부 이후 위 기간 내에 본인 및 부양가족 중 1인이라도 주택을 소유한 사실이 판명되었을 시 대부취소 및 대부금 환수처리에 대해 이의를 제기하지 아니할 것이며, 대부받은 금액(규정에 따른 연체이자 포함)을 즉시 일시 상환할 것을 서약합니다.
+
+만약 일시적으로 2주택을 소유하게 된 경우 지원일로부터 1년 이내에 반드시 1주택을 매도할 것이며, 그러지 못할 경우 기금운영규정에 따라 대부받은 원리금과 연체이자를 납부하겠습니다.`
 
 const PRIVACY_TEXT = `한국지방재정공제회 사내근로복지기금 지원 신청과 관련하여 아래와 같이 귀하의 개인정보를 수집 및 이용하고자 합니다.
 
@@ -83,6 +98,7 @@ export default function ApplyPage() {
   const [dynRows, setDynRows] = useState<Record<string, Record<string, string>[]>>({})
   const [privacyConsent, setPrivacyConsent] = useState(false)
   const [loanConsent, setLoanConsent] = useState(false)
+  const [housingConsent, setHousingConsent] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
@@ -135,7 +151,8 @@ export default function ApplyPage() {
           setValues(initVals)
           setExistingFiles(initFiles)
           setPrivacyConsent(true)
-          if (cfg.fields.some(f => f.type === 'loan_agreement')) setLoanConsent(true)
+          if (cfg.fields.some(f => f.type === 'loan_agreement') || cfg.대부동의필요) setLoanConsent(true)
+          if (cfg.fields.some(f => f.type === 'housing_agreement') || cfg.무주택서약필요) setHousingConsent(true)
         }
       }
       setDynRows(initDyn)
@@ -165,7 +182,8 @@ export default function ApplyPage() {
     return Array.from(map.entries())
   }
 
-  const hasLoan = formConfig?.fields.some(f => f.type === 'loan_agreement') ?? false
+  const hasLoan = (formConfig?.대부동의필요 === true) || (formConfig?.fields.some(f => f.type === 'loan_agreement') ?? false)
+  const hasHousing = (formConfig?.무주택서약필요 === true) || (formConfig?.fields.some(f => f.type === 'housing_agreement') ?? false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -175,7 +193,8 @@ export default function ApplyPage() {
       setTimeout(() => document.getElementById('submit-error')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
     }
     if (hasLoan && profile?.status === 'leave') { showError('휴직 중인 직원은 대부사업 신청이 제한됩니다. (제7조 1항)'); return }
-    if (hasLoan && !loanConsent) { showError('대부 이행 사항에 동의해주세요.'); return }
+    if (hasLoan && !loanConsent) { showError('[서식2] 대부규정 준수 동의서에 동의해주세요.'); return }
+    if (hasHousing && !housingConsent) { showError('[서식3] 무주택·1주택 서약서에 동의해주세요.'); return }
     if (!privacyConsent) { showError('개인정보 수집 및 이용에 동의해주세요.'); return }
 
     for (const f of formConfig.fields) {
@@ -187,7 +206,7 @@ export default function ApplyPage() {
       if (DYNAMIC_TYPES.includes(f.type) && !(dynRows[f.id] || []).some(r => Object.values(r).some(v => v))) {
         showError(`'${f.label}'을 입력해주세요.`); return
       }
-      if (!['file', 'account', ...DYNAMIC_TYPES, 'loan_agreement'].includes(f.type) && !values[f.id]) {
+      if (!['file', 'account', ...DYNAMIC_TYPES, 'loan_agreement', 'housing_agreement'].includes(f.type) && !values[f.id]) {
         showError(`'${f.label}' 항목을 입력해주세요.`); return
       }
     }
@@ -221,10 +240,15 @@ export default function ApplyPage() {
           if (f.type === 'vaccination_records') appData['예방접종총액'] = rows.reduce((s, r) => s + (parseInt(r.금액) || 0), 0)
         } else if (f.type === 'loan_agreement') {
           appData[f.label] = '동의함'
+        } else if (f.type === 'housing_agreement') {
+          appData[f.label] = '동의함'
         } else {
           appData[f.label] = values[f.id] || ''
         }
       }
+      // 자동 동의 섹션도 신청 데이터에 기록
+      if (formConfig.대부동의필요) appData['대부규정 준수 동의'] = '동의함'
+      if (formConfig.무주택서약필요) appData['무주택·1주택 서약'] = '동의함'
       if (editId) {
         await updateDoc(doc(db, 'applications', editId), {
           status: 'pending',
@@ -278,7 +302,19 @@ export default function ApplyPage() {
   if (!formConfig) return null
 
   const sections = getSections()
-  const privacyNum = sections.length + 2
+  // section number after 신청자 정보(1) + N user sections
+  let nextSecNum = sections.length + 2
+  const requireLoanFlag = formConfig.대부동의필요 === true
+  // 무주택서약(서식3): 조건이 설정되어 있으면 사용자의 선택값이 조건값에 포함될 때만 노출
+  const housingTriggerField = formConfig.무주택서약조건필드ID
+  const housingTriggerValues = formConfig.무주택서약조건값들 || []
+  const housingMatches = !housingTriggerField
+    ? true
+    : housingTriggerValues.includes(values[housingTriggerField] || '')
+  const requireHousingFlag = formConfig.무주택서약필요 === true && housingMatches
+  const loanNum = requireLoanFlag ? nextSecNum++ : null
+  const housingNum = requireHousingFlag ? nextSecNum++ : null
+  const privacyNum = nextSecNum
 
   const renderField = (field: FormField) => {
     switch (field.type) {
@@ -508,12 +544,15 @@ export default function ApplyPage() {
           </div>
         )
 
-      case 'radio':
+      case 'radio': {
+        const radioOpts = Array.isArray(field.options)
+          ? field.options
+          : (typeof field.options === 'string' ? (field.options as string).split('\n').filter(Boolean) : [])
         return (
           <div key={field.id} style={{ marginBottom: 20 }}>
             <label style={fldLabel}>{field.label} {field.required && <span style={req}>*</span>}</label>
             <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-              {field.options?.map(opt => (
+              {radioOpts.map(opt => (
                 <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 14 }}>
                   <input type="radio" name={field.id} value={opt} checked={values[field.id] === opt}
                     onChange={() => set(field.id, opt)} style={{ accentColor: '#1a56db' }} />
@@ -523,6 +562,7 @@ export default function ApplyPage() {
             </div>
           </div>
         )
+      }
 
       case 'file':
         return (
@@ -556,17 +596,21 @@ export default function ApplyPage() {
           </div>
         )
 
-      case 'select':
+      case 'select': {
+        const selectOpts = Array.isArray(field.options)
+          ? field.options
+          : (typeof field.options === 'string' ? (field.options as string).split('\n').filter(Boolean) : [])
         return (
           <div key={field.id} style={{ marginBottom: 20 }}>
             <label style={fldLabel}>{field.label} {field.required && <span style={req}>*</span>}</label>
             <select value={values[field.id] || ''} onChange={e => set(field.id, e.target.value)}
               style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 12px', fontSize: 14, outline: 'none', background: '#fff', boxSizing: 'border-box' }}>
               <option value="">-- 선택하세요 --</option>
-              {field.options?.map(o => <option key={o} value={o}>{o}</option>)}
+              {selectOpts.map(o => <option key={o} value={o}>{o}</option>)}
             </select>
           </div>
         )
+      }
 
       case 'textarea':
         return (
@@ -579,6 +623,7 @@ export default function ApplyPage() {
         )
 
       case 'loan_agreement':
+      case 'housing_agreement':
         return null
 
       default:
@@ -627,6 +672,7 @@ export default function ApplyPage() {
 
           {sections.map(([secTitle, fields], idx) => {
             const isLoanSec = fields.every(f => f.type === 'loan_agreement')
+            const isHousingSec = fields.every(f => f.type === 'housing_agreement')
             const isLastSec = idx === sections.length - 1
             return (
               <div key={secTitle} style={card}>
@@ -638,22 +684,67 @@ export default function ApplyPage() {
                     </div>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                       <input type="checkbox" checked={loanConsent} onChange={e => setLoanConsent(e.target.checked)} style={{ width: 16, height: 16, accentColor: '#1a56db' }} />
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>위 대부 이행 사항을 확인하였으며 이에 동의합니다. (필수)</span>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>위 [서식2] 대부규정 준수 및 이자비용 등 공제납부 동의서를 확인하였으며 이에 동의합니다. (필수)</span>
+                    </label>
+                  </>
+                ) : isHousingSec ? (
+                  <>
+                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 16px', fontSize: 12, color: '#374151', lineHeight: 1.8, background: '#fafafa', maxHeight: 200, overflowY: 'auto', whiteSpace: 'pre-wrap', marginBottom: 12 }}>
+                      {HOUSING_TEXT}
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={housingConsent} onChange={e => setHousingConsent(e.target.checked)} style={{ width: 16, height: 16, accentColor: '#1a56db' }} />
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>위 [서식3] 무주택·1주택 서약서를 확인하였으며 이에 서약합니다. (필수)</span>
                     </label>
                   </>
                 ) : (
                   <>
-                    {fields.map(f => renderField(f))}
-                    {isLastSec && formConfig.한도설명 && (
-                      <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '8px 12px', fontSize: 12, color: '#1e40af', marginTop: 4 }}>
-                        ① {formConfig.한도설명}
+                    {idx === 0 && (formConfig.신청내용주석 || formConfig.한도설명) && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+                        {formConfig.신청내용주석 && (
+                          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '10px 14px', fontSize: 12, color: '#92400e', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+                            💡 {formConfig.신청내용주석}
+                          </div>
+                        )}
+                        {formConfig.한도설명 && (
+                          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '8px 12px', fontSize: 12, color: '#1e40af', whiteSpace: 'pre-line' }}>
+                            ① {formConfig.한도설명}
+                          </div>
+                        )}
                       </div>
                     )}
+                    {fields.map(f => renderField(f))}
                   </>
                 )}
               </div>
             )
           })}
+
+          {requireLoanFlag && loanNum !== null && (
+            <div style={card}>
+              <div style={secHdr}><CircNum n={loanNum} /> 대부규정 준수 및 이자비용 등 공제납부 동의</div>
+              <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 16px', fontSize: 12, color: '#374151', lineHeight: 1.8, background: '#fafafa', maxHeight: 240, overflowY: 'auto', whiteSpace: 'pre-wrap', marginBottom: 12 }}>
+                {LOAN_TEXT}
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={loanConsent} onChange={e => setLoanConsent(e.target.checked)} style={{ width: 16, height: 16, accentColor: '#1a56db' }} />
+                <span style={{ fontSize: 13, fontWeight: 600 }}>위 [서식2] 대부규정 준수 및 이자비용 등 공제납부 동의서를 확인하였으며 이에 동의합니다. (필수)</span>
+              </label>
+            </div>
+          )}
+
+          {requireHousingFlag && housingNum !== null && (
+            <div style={card}>
+              <div style={secHdr}><CircNum n={housingNum} /> 무주택·1주택 서약</div>
+              <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 16px', fontSize: 12, color: '#374151', lineHeight: 1.8, background: '#fafafa', maxHeight: 240, overflowY: 'auto', whiteSpace: 'pre-wrap', marginBottom: 12 }}>
+                {HOUSING_TEXT}
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={housingConsent} onChange={e => setHousingConsent(e.target.checked)} style={{ width: 16, height: 16, accentColor: '#1a56db' }} />
+                <span style={{ fontSize: 13, fontWeight: 600 }}>위 [서식3] 무주택·1주택 서약서를 확인하였으며 이에 서약합니다. (필수)</span>
+              </label>
+            </div>
+          )}
 
           <div style={card}>
             <div style={secHdr}><CircNum n={privacyNum} /> 개인정보 수집 및 이용 동의</div>

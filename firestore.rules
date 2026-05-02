@@ -64,5 +64,23 @@ service cloud.firestore {
       allow read: if isAuth();
       allow write: if isAdmin();
     }
+
+    // Notices (게시판) - read by all authenticated, write by admin
+    match /notices/{noticeId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // FAQs - read by all authenticated, write by admin
+    match /faqs/{faqId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // Budgets (연간 예산) - read & write by admin only
+    match /budgets/{year} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
   }
 }

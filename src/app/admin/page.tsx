@@ -15,7 +15,8 @@ import PendingList from './components/PendingList'
 import CrossTable from './components/CrossTable'
 import ApplicationTable from './components/ApplicationTable'
 import { DetailModal, RejectModal, DeleteModal, AttachModal, ModalOverlay } from './components/Modals'
-import type { Application, UserDoc, RegDoc, FormConfig } from './types'
+import type { Application, UserDoc, RegDoc, FormConfig, BudgetGroup } from './types'
+import { screen } from '@/lib/auto-screen'
 
 const btnAction: React.CSSProperties = { color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }
 
@@ -91,21 +92,74 @@ function AdminPageInner() {
   const loadData = useCallback(async () => {
     setDataLoading(true)
     try {
-      const [formsSnap, appsSnap] = await Promise.all([
+      const [formsSnap, appsSnap, budgetSnap] = await Promise.all([
         getDocs(collection(db, 'form_configs')),
         getDocs(query(collection(db, 'applications'), orderBy('created_at', 'desc'))),
+        getDocs(collection(db, 'budget_groups')),
       ])
 
       const formMap: Record<string, string> = {}
-      formsSnap.docs.forEach(d => { formMap[d.id] = (d.data() as { 제목: string }).제목 })
+      const formFullMap: Record<string, FormConfig> = {}
+      formsSnap.docs.forEach(d => {
+        const data = d.data()
+        formMap[d.id] = (data as { 제목: string }).제목
+        formFullMap[d.id] = { id: d.id, ...data } as FormConfig
+      })
       setForms(formsSnap.docs
         .map(d => ({ id: d.id, ...d.data() } as FormConfig))
         .sort((a, b) => (a.order || 0) - (b.order || 0)))
 
-      setApps(appsSnap.docs.map(d => ({
+      const budgetGroups = budgetSnap.docs.map(d => ({ id: d.id, ...d.data() } as BudgetGroup))
+
+      const rawApps = appsSnap.docs.map(d => ({
         id: d.id, user_id: d.data().user_id, ...d.data(),
         formTitle: formMap[d.data().form_id] || d.data().form_id,
-      } as Application)))
+      } as Application))
+
+      // 사용자별 신청 그룹화 (중복 검사용)
+      const byUser: Record<string, Application[]> = {}
+      for (const a of rawApps) {
+        const k = a.user_id || a.applicant?.사번 || ''
+        if (!k) continue
+        if (!byUser[k]) byUser[k] = []
+        byUser[k].push(a)
+      }
+
+      // 사용자 정보 미리 로드 (휴직자 검사용)
+      let usersMap: Record<string, UserDoc> = {}
+      try {
+        const uSnap = await getDocs(collection(db, 'users'))
+        usersMap = Object.fromEntries(uSnap.docs.map(u => [u.id, { id: u.id, ...u.data() } as UserDoc]))
+      } catch { /* fallback: 빈 맵 */ }
+
+      // 각 신청에 자동 사전심사 결과 첨부
+      const screenedApps: Application[] = rawApps.map(a => {
+        const userKey = a.user_id || a.applicant?.사번 || ''
+        const userApps = byUser[userKey] || []
+        const userDoc = a.user_id ? usersMap[a.user_id] : undefined
+        const fullForm = formFullMap[a.form_id]
+        const result = screen(a, {
+          form: fullForm
+            ? {
+                id: fullForm.id,
+                제목: fullForm.제목,
+                fields: (fullForm.fields as { id: string; label: string; type: string; required?: boolean; options?: string[] | string }[]) || [],
+                periods: fullForm.periods,
+                대부동의필요: fullForm.대부동의필요,
+                무주택서약필요: fullForm.무주택서약필요,
+                무주택서약조건필드ID: fullForm.무주택서약조건필드ID,
+                무주택서약조건값들: fullForm.무주택서약조건값들,
+              }
+            : null,
+          user: userDoc ? { 사번: userDoc.사번, status: userDoc.status } : null,
+          userApps,
+          allApps: rawApps,
+          budgetGroups,
+        })
+        return { ...a, screen: result }
+      })
+
+      setApps(screenedApps)
 
       const [usersResult, settingsResult, notifyResult, regsResult] = await Promise.allSettled([
         getDocs(collection(db, 'users')),
