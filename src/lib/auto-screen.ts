@@ -154,33 +154,75 @@ function checkRowSumMismatch(data: Record<string, unknown> | undefined, form: Sc
   return null
 }
 
-/** 필수 필드 누락 검사 */
+/** 라벨 정규화 — 공백 제거 + NFC 정규화 후 비교 */
+function normalize(s: string): string {
+  return s.normalize('NFC').replace(/\s+/g, '').toLowerCase()
+}
+
+/** 신청 데이터에서 필드 값을 찾는다.
+ *  1) label 직접 매칭 → 2) 정규화 매칭 → 3) id 매칭 (혹시 옛 데이터)
+ *  match 우선순위로 첫 hit 반환. 못 찾으면 undefined.
+ */
+function findFieldValue(data: Record<string, unknown> | undefined, f: ScreenFormField): unknown {
+  if (!data) return undefined
+  if (f.label in data) return data[f.label]
+  const dataKeys = Object.keys(data)
+  const nLabel = normalize(f.label)
+  // 정규화 비교
+  const fuzzyKey = dataKeys.find(k => normalize(k) === nLabel)
+  if (fuzzyKey) return data[fuzzyKey]
+  // ID 매칭 (구버전 호환)
+  if (f.id in data) return data[f.id]
+  return undefined
+}
+
+/** 값이 "비어있는지" 판정 — 0, false 는 유효한 값으로 인정 */
+function isEmpty(v: unknown): boolean {
+  if (v === undefined || v === null) return true
+  if (typeof v === 'string') return v.trim() === ''
+  if (Array.isArray(v)) {
+    if (v.length === 0) return true
+    return v.every(r => {
+      if (r === null || r === undefined) return true
+      if (typeof r !== 'object') return !r
+      // 행 객체: 모든 값이 빈 문자열이거나 nullish 일 때만 빈 행
+      const vals = Object.values(r as Record<string, unknown>)
+      return vals.every(x => x === undefined || x === null || (typeof x === 'string' && x.trim() === ''))
+    })
+  }
+  if (typeof v === 'object') return Object.keys(v as Record<string, unknown>).length === 0
+  return false
+}
+
+/** 필수 필드 누락 검사 — 결과는 warn 레벨 (라벨 변경/필드 추가 등 구조적 이슈 가능성)
+ *  단, 신청 데이터 자체가 완전히 비어있는 경우만 block
+ */
 function checkRequired(app: ScreenApp, form: ScreenFormConfig): ScreenFlag | null {
   if (!form.fields) return null
+  const dataEmpty = !app.data || Object.keys(app.data).length === 0
+  if (dataEmpty) {
+    return {
+      level: 'block',
+      code: 'EMPTY_DATA',
+      label: '신청 데이터 없음',
+      detail: '저장된 신청 내용이 비어있습니다.',
+    }
+  }
   const missing: string[] = []
   for (const f of form.fields) {
     if (!f.required) continue
+    // 시스템 자동 처리 필드는 검사 제외
     if (f.type === 'loan_agreement' || f.type === 'housing_agreement') continue
-    const v = app.data?.[f.label]
-    if (v === undefined || v === null || v === '') {
-      missing.push(f.label)
-      continue
-    }
-    if (Array.isArray(v) && v.length === 0) {
-      missing.push(f.label)
-      continue
-    }
-    // 행 단위 필드: 모든 셀이 비었으면 누락 처리
-    if (Array.isArray(v) && v.every(r => !r || (typeof r === 'object' && Object.values(r as Record<string, unknown>).every(x => !x)))) {
-      missing.push(f.label)
-    }
+    const v = findFieldValue(app.data, f)
+    if (isEmpty(v)) missing.push(f.label)
   }
   if (missing.length === 0) return null
+  // 보수적 판정: 차단이 아닌 경고로 노출 (라벨 변경/늦게 추가된 필수 등 가능성)
   return {
-    level: 'block',
+    level: 'warn',
     code: 'MISSING_REQUIRED',
-    label: '필수 항목 누락',
-    detail: missing.join(', '),
+    label: `필수 항목 ${missing.length}건 미확인`,
+    detail: `${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ` 외 ${missing.length - 5}건` : ''}. 폼 편집 후 라벨이 바뀌었거나 새 필수 항목이 추가됐을 수 있습니다.`,
   }
 }
 
@@ -201,15 +243,15 @@ function checkPeriod(app: ScreenApp, form: ScreenFormConfig): ScreenFlag | null 
   }
 }
 
-/** 휴직자 대부 차단 */
+/** 휴직자 대부 — 현재 휴직 상태일 때 경고 (신청 시점에는 휴직이 아니었을 수 있음) */
 function checkLeaveLoan(form: ScreenFormConfig, user: ScreenUser | null): ScreenFlag | null {
   if (!form.대부동의필요) return null
   if (user?.status !== 'leave') return null
   return {
-    level: 'block',
+    level: 'warn',
     code: 'LEAVE_LOAN',
-    label: '휴직자 대부 신청 차단',
-    detail: '휴직 중인 직원은 대부사업 신청 불가 (제7조 1항)',
+    label: '신청자 현재 휴직 중',
+    detail: '대부사업 제한 대상 (제7조 1항). 신청 시점 상태를 확인 후 처리 바랍니다.',
   }
 }
 
@@ -218,15 +260,16 @@ function checkHousingOath(app: ScreenApp, form: ScreenFormConfig): ScreenFlag | 
   if (!form.무주택서약필요) return null
   const tf = form.무주택서약조건필드ID
   const tv = form.무주택서약조건값들 || []
-  // 조건 필드 ID로 라벨 찾기
+  if (!tf) return null
   const tField = form.fields?.find(f => f.id === tf)
   if (!tField) return null
-  const userValue = app.data?.[tField.label]
+  const userValue = findFieldValue(app.data, tField)
   if (typeof userValue !== 'string') return null
   if (tv.length > 0 && !tv.includes(userValue)) return null
   // 조건이 매칭되었는데 서약값이 누락
-  const hasOath = !!app.data?.['무주택·1주택 서약'] || !!app.data?.['무주택서약']
-  if (hasOath) return null
+  const data = app.data || {}
+  const oathKeys = Object.keys(data).filter(k => /무주택|1주택|서약/.test(k))
+  if (oathKeys.some(k => !!data[k])) return null
   return {
     level: 'warn',
     code: 'HOUSING_OATH_MISSING',
