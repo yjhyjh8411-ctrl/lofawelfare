@@ -203,10 +203,11 @@ export default function FormEditPage() {
               {limitDesc.split('\n').length} / 2줄 · 줄당 {Math.max(...limitDesc.split('\n').map(l => l.length), 0)} / 18자
             </div>
           </div>
+          {(formId === 'loan-application' || /대부/.test(title)) && (
           <div style={{ marginTop: 18, padding: 14, background: '#f9fafb', borderRadius: 8, border: '1px solid #e5e7eb' }}>
             <label style={{ ...labelStyle, marginBottom: 8 }}>🏦 대부신청 폼 전용 — 자동 동의 섹션</label>
-            <div style={{ fontSize: 11, color: '#dc2626', marginBottom: 10, fontWeight: 600 }}>
-              ⚠️ 이 옵션은 「대부신청」 폼에서만 사용하세요. 다른 복지사업(의료·돌봄·장학 등)에는 체크하지 마세요.
+            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 10 }}>
+              주택구입자금·주택임차자금·생활안정자금 신청 시 사용자에게 노출될 자동 동의 섹션입니다.
             </div>
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', marginBottom: 6 }}>
               <input
@@ -279,6 +280,7 @@ export default function FormEditPage() {
               체크 시 사용자 신청서에 개인정보 동의처럼 자동 섹션으로 추가됩니다.
             </div>
           </div>
+          )}
           <div style={{ marginTop: 14 }}>
             <label style={labelStyle}>신청 내용 하단 안내문 (2번 섹션 하단 노란박스 표시 · 최대 2줄)</label>
             <textarea

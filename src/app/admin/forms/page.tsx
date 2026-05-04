@@ -205,72 +205,6 @@ export default function AdminFormsPage() {
     setDragOverIdx(null)
   }
 
-  /** 일회성 마이그레이션: 경조비지원 폼 정리
-   *  1) 신청금액 위에 대상자/관계/지원대상 3필드 추가 (중복 시 건너뜀)
-   *  2) 대부 관련 플래그(대부동의필요·무주택서약필요·조건 필드) 모두 OFF
-   */
-  const handleMigrateCondolenceFields = async () => {
-    try {
-      const target = forms.find(f => f.id === 'condolence-support' || f.제목 === '경조비지원')
-      if (!target) {
-        showMsg('경조비지원 폼을 찾을 수 없습니다.')
-        return
-      }
-      const snap = await getDoc(doc(db, 'form_configs', target.id))
-      if (!snap.exists()) {
-        showMsg('경조비지원 폼 데이터를 읽지 못했습니다.')
-        return
-      }
-      const data = snap.data()
-      const existing: { id: string; label: string; type: string; required?: boolean; sensitive?: boolean; options?: string[] | string }[] =
-        Array.isArray(data.fields) ? data.fields : []
-
-      const newFields = [
-        { id: 'target_name', label: '대상자 성명', type: 'text', required: true, sensitive: false },
-        { id: 'target_relation', label: '신청인과의 관계', type: 'select', required: true, sensitive: false, options: ['본인', '배우자', '자녀', '부', '모', '형제자매', '조부모', '기타'] },
-        { id: 'event_target', label: '지원대상 경조사', type: 'select', required: true, sensitive: false, options: ['본인 결혼', '자녀 결혼', '출산', '부모상', '배우자상', '자녀상', '형제자매상', '조부모상', '기타'] },
-      ]
-
-      const existingIds = new Set(existing.map(f => f.id))
-      const toInsert = newFields.filter(f => !existingIds.has(f.id))
-
-      // amount 필드 위치 찾기 (없으면 끝에 추가)
-      const amountIdx = existing.findIndex(f => f.id === 'amount' || /신청\s*금액|amount/i.test(f.label))
-      const insertAt = amountIdx >= 0 ? amountIdx : existing.length
-      const merged = toInsert.length > 0
-        ? [...existing.slice(0, insertAt), ...toInsert, ...existing.slice(insertAt)]
-        : existing
-
-      // 대부 관련 플래그가 켜져 있으면 OFF 처리
-      const loanFlagsActive = data.대부동의필요 === true || data.무주택서약필요 === true
-        || (typeof data.무주택서약조건필드ID === 'string' && data.무주택서약조건필드ID !== '')
-        || (Array.isArray(data.무주택서약조건값들) && data.무주택서약조건값들.length > 0)
-
-      const patch: Record<string, unknown> = {}
-      if (toInsert.length > 0) patch.fields = merged
-      if (loanFlagsActive) {
-        patch.대부동의필요 = false
-        patch.무주택서약필요 = false
-        patch.무주택서약조건필드ID = ''
-        patch.무주택서약조건값들 = []
-      }
-
-      if (Object.keys(patch).length === 0) {
-        showMsg('이미 정리된 상태입니다 (필드·대부플래그 모두 정상).')
-        return
-      }
-
-      await updateDoc(doc(db, 'form_configs', target.id), patch)
-      const actions: string[] = []
-      if (toInsert.length > 0) actions.push(`${toInsert.length}개 필드 추가 (${toInsert.map(f => f.label).join(', ')})`)
-      if (loanFlagsActive) actions.push('대부 동의·무주택 서약 플래그 OFF')
-      showMsg(`완료 — ${actions.join(' / ')}`)
-    } catch (e) {
-      console.error(e)
-      showMsg('처리 실패: ' + (e instanceof Error ? e.message : String(e)))
-    }
-  }
-
   const updateFormPeriods = async (formId: string, periods: { year: number; start: string; end: string }[]) => {
     await updateDoc(doc(db, 'form_configs', formId), { periods })
     setForms(prev => prev.map(f => f.id === formId ? { ...f, periods } : f))
@@ -317,21 +251,12 @@ export default function AdminFormsPage() {
             <button onClick={() => router.back()} style={{ background: 'none', border: 'none', color: '#1a56db', cursor: 'pointer', fontSize: 13, marginBottom: 8 }}>← 관리자</button>
             <h2 style={{ fontSize: 22, fontWeight: 700, color: '#111827' }}>신청서 관리</h2>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={handleMigrateCondolenceFields}
-              title="경조비지원 폼에 대상자/관계/지원대상 필드를 신청금액 위에 추가"
-              style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
-            >
-              🔧 경조비지원 필드 동기화
-            </button>
-            <button
-              onClick={() => setShowAdd(!showAdd)}
-              style={{ background: '#1a56db', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', fontWeight: 600, cursor: 'pointer' }}
-            >
-              + 복지사업 추가
-            </button>
-          </div>
+          <button
+            onClick={() => setShowAdd(!showAdd)}
+            style={{ background: '#1a56db', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', fontWeight: 600, cursor: 'pointer' }}
+          >
+            + 복지사업 추가
+          </button>
         </div>
 
         {/* Add form */}
