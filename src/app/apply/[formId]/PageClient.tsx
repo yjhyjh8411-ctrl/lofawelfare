@@ -53,14 +53,32 @@ const LOAN_TEXT = `[서식2] 대부규정 준수 및 이자비용 등 공제납�
 
 셋째, 퇴직시 대부금 미상환액이 남아있는 경우 퇴직금에서 공제하여 납부하고 대부잔액이 퇴직금을 초과하는 경우 퇴직금 지급을 유예할 것에 동의함`
 
-const HOUSING_TEXT = `[서식3] 무주택·1주택 서약서
+const HOUSING_TEXT_TEMPLATE = `[서식3] 무주택·1주택 서약서
 
-상기 본인은 주택자금 대부를 신청함에 있어서 본인 및 부양가족 전원이 주택자금 대부신청일 기준으로 (   )년 (   )개월 전부터 무주택자(1주택자)임을 서약합니다.
+상기 본인은 주택자금 대부를 신청함에 있어서 본인 및 부양가족 전원이 주택자금 대부신청일 기준으로 ({years})년 ({months})개월 전부터 무주택자(1주택자)임을 서약합니다.
 (무주택 기산일은 만 30세가 된 날 혹은 혼인신고를 한 날 중 빠른 날)
 
 만일 대부 이후 위 기간 내에 본인 및 부양가족 중 1인이라도 주택을 소유한 사실이 판명되었을 시 대부취소 및 대부금 환수처리에 대해 이의를 제기하지 아니할 것이며, 대부받은 금액(규정에 따른 연체이자 포함)을 즉시 일시 상환할 것을 서약합니다.
 
 만약 일시적으로 2주택을 소유하게 된 경우 지원일로부터 1년 이내에 반드시 1주택을 매도할 것이며, 그러지 못할 경우 기금운영규정에 따라 대부받은 원리금과 연체이자를 납부하겠습니다.`
+
+function buildHousingText(years: number | string, months: number | string) {
+  return HOUSING_TEXT_TEMPLATE
+    .replace('{years}', String(years || '   '))
+    .replace('{months}', String(months || '   '))
+}
+
+/** YYYY-MM 두 시점 사이를 년/개월 단위로 계산 */
+function diffYearsMonths(start: string, end: string): { years: number; months: number; valid: boolean } {
+  const m1 = start.match(/^(\d{4})-(\d{2})/)
+  const m2 = end.match(/^(\d{4})-(\d{2})/)
+  if (!m1 || !m2) return { years: 0, months: 0, valid: false }
+  const y1 = parseInt(m1[1]), mo1 = parseInt(m1[2])
+  const y2 = parseInt(m2[1]), mo2 = parseInt(m2[2])
+  const total = (y2 - y1) * 12 + (mo2 - mo1)
+  if (total < 0) return { years: 0, months: 0, valid: false }
+  return { years: Math.floor(total / 12), months: total % 12, valid: true }
+}
 
 const PRIVACY_TEXT = `한국지방재정공제회 사내근로복지기금 지원 신청과 관련하여 아래와 같이 귀하의 개인정보를 수집 및 이용하고자 합니다.
 
@@ -99,6 +117,10 @@ export default function ApplyPage() {
   const [privacyConsent, setPrivacyConsent] = useState(false)
   const [loanConsent, setLoanConsent] = useState(false)
   const [housingConsent, setHousingConsent] = useState(false)
+  const [housingRegion, setHousingRegion] = useState('')
+  const [housingAddress, setHousingAddress] = useState('')
+  const [housingStart, setHousingStart] = useState('')
+  const [housingEnd, setHousingEnd] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
@@ -153,6 +175,12 @@ export default function ApplyPage() {
           setPrivacyConsent(true)
           if (cfg.fields.some(f => f.type === 'loan_agreement') || cfg.대부동의필요) setLoanConsent(true)
           if (cfg.fields.some(f => f.type === 'housing_agreement') || cfg.무주택서약필요) setHousingConsent(true)
+          // 주택자금 추가 입력값 복원
+          const ad = appSnap.data().data as Record<string, unknown>
+          if (typeof ad?.['주택구입(임차)지역'] === 'string') setHousingRegion(ad['주택구입(임차)지역'] as string)
+          if (typeof ad?.['주택자금 주소'] === 'string') setHousingAddress(ad['주택자금 주소'] as string)
+          if (typeof ad?.['무주택기간 시작'] === 'string') setHousingStart(ad['무주택기간 시작'] as string)
+          if (typeof ad?.['무주택기간 종료'] === 'string') setHousingEnd(ad['무주택기간 종료'] as string)
         }
       }
       setDynRows(initDyn)
@@ -194,7 +222,23 @@ export default function ApplyPage() {
     }
     if (hasLoan && profile?.status === 'leave') { showError('휴직 중인 직원은 대부사업 신청이 제한됩니다. (제7조 1항)'); return }
     if (hasLoan && !loanConsent) { showError('[서식2] 대부규정 준수 동의서에 동의해주세요.'); return }
-    if (hasHousing && !housingConsent) { showError('[서식3] 무주택·1주택 서약서에 동의해주세요.'); return }
+    // 무주택서약 조건이 매칭되었을 때만 추가 검증
+    const triggerFieldId = formConfig.무주택서약조건필드ID
+    const triggerValues = formConfig.무주택서약조건값들 || []
+    const housingTriggered = formConfig.무주택서약필요 === true && (
+      !triggerFieldId ? true : triggerValues.includes(values[triggerFieldId] || '')
+    )
+    if (housingTriggered) {
+      if (!housingRegion.trim()) { showError('주택구입(임차) 지역을 입력해주세요.'); return }
+      if (!housingAddress.trim()) { showError('주소를 입력해주세요.'); return }
+      if (!housingStart || !housingEnd) { showError('무주택(1주택) 기간을 입력해주세요.'); return }
+      const dur = diffYearsMonths(housingStart, housingEnd)
+      if (!dur.valid) { showError('무주택(1주택) 기간이 올바르지 않습니다. 시작·종료 순서를 확인해주세요.'); return }
+      if (!housingConsent) { showError('[서식3] 무주택·1주택 서약서에 동의해주세요.'); return }
+    } else if (hasHousing && !housingConsent && !triggerFieldId) {
+      // 조건 미설정인 폼: 서약서 항상 필수
+      showError('[서식3] 무주택·1주택 서약서에 동의해주세요.'); return
+    }
     if (!privacyConsent) { showError('개인정보 수집 및 이용에 동의해주세요.'); return }
 
     for (const f of formConfig.fields) {
@@ -248,7 +292,17 @@ export default function ApplyPage() {
       }
       // 자동 동의 섹션도 신청 데이터에 기록
       if (formConfig.대부동의필요) appData['대부규정 준수 동의'] = '동의함'
-      if (formConfig.무주택서약필요) appData['무주택·1주택 서약'] = '동의함'
+      if (housingTriggered || (formConfig.무주택서약필요 && !formConfig.무주택서약조건필드ID)) {
+        appData['무주택·1주택 서약'] = '동의함'
+        if (housingRegion.trim()) appData['주택구입(임차)지역'] = housingRegion.trim()
+        if (housingAddress.trim()) appData['주택자금 주소'] = housingAddress.trim()
+        if (housingStart) appData['무주택기간 시작'] = housingStart
+        if (housingEnd) appData['무주택기간 종료'] = housingEnd
+        if (housingStart && housingEnd) {
+          const d = diffYearsMonths(housingStart, housingEnd)
+          if (d.valid) appData['무주택기간 (년/개월)'] = `${d.years}년 ${d.months}개월`
+        }
+      }
       if (editId) {
         await updateDoc(doc(db, 'applications', editId), {
           status: 'pending',
@@ -690,7 +744,7 @@ export default function ApplyPage() {
                 ) : isHousingSec ? (
                   <>
                     <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 16px', fontSize: 12, color: '#374151', lineHeight: 1.8, background: '#fafafa', maxHeight: 200, overflowY: 'auto', whiteSpace: 'pre-wrap', marginBottom: 12 }}>
-                      {HOUSING_TEXT}
+                      {buildHousingText('   ', '   ')}
                     </div>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                       <input type="checkbox" checked={housingConsent} onChange={e => setHousingConsent(e.target.checked)} style={{ width: 16, height: 16, accentColor: '#1a56db' }} />
@@ -733,18 +787,72 @@ export default function ApplyPage() {
             </div>
           )}
 
-          {requireHousingFlag && housingNum !== null && (
-            <div style={card}>
-              <div style={secHdr}><CircNum n={housingNum} /> 무주택·1주택 서약</div>
-              <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 16px', fontSize: 12, color: '#374151', lineHeight: 1.8, background: '#fafafa', maxHeight: 240, overflowY: 'auto', whiteSpace: 'pre-wrap', marginBottom: 12 }}>
-                {HOUSING_TEXT}
+          {requireHousingFlag && housingNum !== null && (() => {
+            const dur = diffYearsMonths(housingStart, housingEnd)
+            const housingText = buildHousingText(dur.valid ? dur.years : '   ', dur.valid ? dur.months : '   ')
+            const inputBox: React.CSSProperties = { width: '100%', border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 12px', fontSize: 14, outline: 'none', boxSizing: 'border-box' }
+            return (
+              <div style={card}>
+                <div style={secHdr}><CircNum n={housingNum} /> 무주택·1주택 서약</div>
+
+                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: 14, marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#92400e', marginBottom: 10 }}>📋 주택자금 추가 정보 입력</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                    <div>
+                      <label style={{ ...fldLabel, fontSize: 12 }}>주택구입(임차) 지역 <span style={req}>*</span></label>
+                      <input
+                        value={housingRegion}
+                        onChange={e => setHousingRegion(e.target.value)}
+                        placeholder="예: 서울시 강남구"
+                        style={inputBox}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ ...fldLabel, fontSize: 12 }}>주소 <span style={req}>*</span></label>
+                      <input
+                        value={housingAddress}
+                        onChange={e => setHousingAddress(e.target.value)}
+                        placeholder="예: 강남구 테헤란로 123, 101동 1001호"
+                        style={inputBox}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ ...fldLabel, fontSize: 12 }}>무주택(1주택) 기간 <span style={req}>*</span></label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <input
+                        type="month"
+                        value={housingStart}
+                        onChange={e => setHousingStart(e.target.value)}
+                        style={{ ...inputBox, width: 'auto', flex: '0 1 auto' }}
+                      />
+                      <span style={{ color: '#6b7280', fontSize: 13 }}>~</span>
+                      <input
+                        type="month"
+                        value={housingEnd}
+                        onChange={e => setHousingEnd(e.target.value)}
+                        style={{ ...inputBox, width: 'auto', flex: '0 1 auto' }}
+                      />
+                      <div style={{ background: '#fff', border: '1px solid #fde68a', borderRadius: 6, padding: '7px 12px', fontSize: 13, fontWeight: 700, color: '#92400e' }}>
+                        {dur.valid ? `${dur.years}년 ${dur.months}개월` : '— 년 — 개월'}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 11, color: '#92400e', marginTop: 6 }}>
+                      ⓘ 무주택 기산일은 만 30세가 된 날 또는 혼인신고일 중 빠른 날입니다. 입력한 기간은 아래 서약서 ( )년 ( )개월 자리에 자동으로 반영됩니다.
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 16px', fontSize: 12, color: '#374151', lineHeight: 1.8, background: '#fafafa', maxHeight: 280, overflowY: 'auto', whiteSpace: 'pre-wrap', marginBottom: 12 }}>
+                  {housingText}
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={housingConsent} onChange={e => setHousingConsent(e.target.checked)} style={{ width: 16, height: 16, accentColor: '#1a56db' }} />
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>위 [서식3] 무주택·1주택 서약서를 확인하였으며 이에 서약합니다. (필수)</span>
+                </label>
               </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                <input type="checkbox" checked={housingConsent} onChange={e => setHousingConsent(e.target.checked)} style={{ width: 16, height: 16, accentColor: '#1a56db' }} />
-                <span style={{ fontSize: 13, fontWeight: 600 }}>위 [서식3] 무주택·1주택 서약서를 확인하였으며 이에 서약합니다. (필수)</span>
-              </label>
-            </div>
-          )}
+            )
+          })()}
 
           <div style={card}>
             <div style={secHdr}><CircNum n={privacyNum} /> 개인정보 수집 및 이용 동의</div>
