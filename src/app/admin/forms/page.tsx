@@ -205,7 +205,10 @@ export default function AdminFormsPage() {
     setDragOverIdx(null)
   }
 
-  /** 일회성 마이그레이션: 경조비지원 폼 신청금액 위에 대상자/관계/지원대상 3필드 추가 */
+  /** 일회성 마이그레이션: 경조비지원 폼 정리
+   *  1) 신청금액 위에 대상자/관계/지원대상 3필드 추가 (중복 시 건너뜀)
+   *  2) 대부 관련 플래그(대부동의필요·무주택서약필요·조건 필드) 모두 OFF
+   */
   const handleMigrateCondolenceFields = async () => {
     try {
       const target = forms.find(f => f.id === 'condolence-support' || f.제목 === '경조비지원')
@@ -228,24 +231,43 @@ export default function AdminFormsPage() {
         { id: 'event_target', label: '지원대상 경조사', type: 'select', required: true, sensitive: false, options: ['본인 결혼', '자녀 결혼', '출산', '부모상', '배우자상', '자녀상', '형제자매상', '조부모상', '기타'] },
       ]
 
-      // 이미 추가되어 있는지 검사
       const existingIds = new Set(existing.map(f => f.id))
       const toInsert = newFields.filter(f => !existingIds.has(f.id))
-      if (toInsert.length === 0) {
-        showMsg('이미 추가된 필드입니다.')
-        return
-      }
 
       // amount 필드 위치 찾기 (없으면 끝에 추가)
       const amountIdx = existing.findIndex(f => f.id === 'amount' || /신청\s*금액|amount/i.test(f.label))
       const insertAt = amountIdx >= 0 ? amountIdx : existing.length
-      const merged = [...existing.slice(0, insertAt), ...toInsert, ...existing.slice(insertAt)]
+      const merged = toInsert.length > 0
+        ? [...existing.slice(0, insertAt), ...toInsert, ...existing.slice(insertAt)]
+        : existing
 
-      await updateDoc(doc(db, 'form_configs', target.id), { fields: merged })
-      showMsg(`${toInsert.length}개 필드 추가 완료 — ${toInsert.map(f => f.label).join(', ')}`)
+      // 대부 관련 플래그가 켜져 있으면 OFF 처리
+      const loanFlagsActive = data.대부동의필요 === true || data.무주택서약필요 === true
+        || (typeof data.무주택서약조건필드ID === 'string' && data.무주택서약조건필드ID !== '')
+        || (Array.isArray(data.무주택서약조건값들) && data.무주택서약조건값들.length > 0)
+
+      const patch: Record<string, unknown> = {}
+      if (toInsert.length > 0) patch.fields = merged
+      if (loanFlagsActive) {
+        patch.대부동의필요 = false
+        patch.무주택서약필요 = false
+        patch.무주택서약조건필드ID = ''
+        patch.무주택서약조건값들 = []
+      }
+
+      if (Object.keys(patch).length === 0) {
+        showMsg('이미 정리된 상태입니다 (필드·대부플래그 모두 정상).')
+        return
+      }
+
+      await updateDoc(doc(db, 'form_configs', target.id), patch)
+      const actions: string[] = []
+      if (toInsert.length > 0) actions.push(`${toInsert.length}개 필드 추가 (${toInsert.map(f => f.label).join(', ')})`)
+      if (loanFlagsActive) actions.push('대부 동의·무주택 서약 플래그 OFF')
+      showMsg(`완료 — ${actions.join(' / ')}`)
     } catch (e) {
       console.error(e)
-      showMsg('필드 추가 실패: ' + (e instanceof Error ? e.message : String(e)))
+      showMsg('처리 실패: ' + (e instanceof Error ? e.message : String(e)))
     }
   }
 
