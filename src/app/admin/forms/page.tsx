@@ -205,6 +205,50 @@ export default function AdminFormsPage() {
     setDragOverIdx(null)
   }
 
+  /** 일회성 마이그레이션: 경조비지원 폼 신청금액 위에 대상자/관계/지원대상 3필드 추가 */
+  const handleMigrateCondolenceFields = async () => {
+    try {
+      const target = forms.find(f => f.id === 'condolence-support' || f.제목 === '경조비지원')
+      if (!target) {
+        showMsg('경조비지원 폼을 찾을 수 없습니다.')
+        return
+      }
+      const snap = await getDoc(doc(db, 'form_configs', target.id))
+      if (!snap.exists()) {
+        showMsg('경조비지원 폼 데이터를 읽지 못했습니다.')
+        return
+      }
+      const data = snap.data()
+      const existing: { id: string; label: string; type: string; required?: boolean; sensitive?: boolean; options?: string[] | string }[] =
+        Array.isArray(data.fields) ? data.fields : []
+
+      const newFields = [
+        { id: 'target_name', label: '대상자 성명', type: 'text', required: true, sensitive: false },
+        { id: 'target_relation', label: '신청인과의 관계', type: 'select', required: true, sensitive: false, options: ['본인', '배우자', '자녀', '부', '모', '형제자매', '조부모', '기타'] },
+        { id: 'event_target', label: '지원대상 경조사', type: 'select', required: true, sensitive: false, options: ['본인 결혼', '자녀 결혼', '출산', '부모상', '배우자상', '자녀상', '형제자매상', '조부모상', '기타'] },
+      ]
+
+      // 이미 추가되어 있는지 검사
+      const existingIds = new Set(existing.map(f => f.id))
+      const toInsert = newFields.filter(f => !existingIds.has(f.id))
+      if (toInsert.length === 0) {
+        showMsg('이미 추가된 필드입니다.')
+        return
+      }
+
+      // amount 필드 위치 찾기 (없으면 끝에 추가)
+      const amountIdx = existing.findIndex(f => f.id === 'amount' || /신청\s*금액|amount/i.test(f.label))
+      const insertAt = amountIdx >= 0 ? amountIdx : existing.length
+      const merged = [...existing.slice(0, insertAt), ...toInsert, ...existing.slice(insertAt)]
+
+      await updateDoc(doc(db, 'form_configs', target.id), { fields: merged })
+      showMsg(`${toInsert.length}개 필드 추가 완료 — ${toInsert.map(f => f.label).join(', ')}`)
+    } catch (e) {
+      console.error(e)
+      showMsg('필드 추가 실패: ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
+
   const updateFormPeriods = async (formId: string, periods: { year: number; start: string; end: string }[]) => {
     await updateDoc(doc(db, 'form_configs', formId), { periods })
     setForms(prev => prev.map(f => f.id === formId ? { ...f, periods } : f))
@@ -251,12 +295,21 @@ export default function AdminFormsPage() {
             <button onClick={() => router.back()} style={{ background: 'none', border: 'none', color: '#1a56db', cursor: 'pointer', fontSize: 13, marginBottom: 8 }}>← 관리자</button>
             <h2 style={{ fontSize: 22, fontWeight: 700, color: '#111827' }}>신청서 관리</h2>
           </div>
-          <button
-            onClick={() => setShowAdd(!showAdd)}
-            style={{ background: '#1a56db', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', fontWeight: 600, cursor: 'pointer' }}
-          >
-            + 복지사업 추가
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={handleMigrateCondolenceFields}
+              title="경조비지원 폼에 대상자/관계/지원대상 필드를 신청금액 위에 추가"
+              style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
+            >
+              🔧 경조비지원 필드 동기화
+            </button>
+            <button
+              onClick={() => setShowAdd(!showAdd)}
+              style={{ background: '#1a56db', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', fontWeight: 600, cursor: 'pointer' }}
+            >
+              + 복지사업 추가
+            </button>
+          </div>
         </div>
 
         {/* Add form */}
