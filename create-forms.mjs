@@ -142,6 +142,9 @@ const forms = [
     fields: [
       { id: 'event_type', label: '경조사 구분', type: 'select', required: true, sensitive: false, options: ['본인 결혼', '자녀 결혼', '출산', '부모상', '배우자상', '자녀상', '기타'] },
       { id: 'event_date', label: '경조사 일자', type: 'date', required: true, sensitive: false },
+      { id: 'target_name', label: '대상자 성명', type: 'text', required: true, sensitive: false },
+      { id: 'target_relation', label: '신청인과의 관계', type: 'select', required: true, sensitive: false, options: ['본인', '배우자', '자녀', '부', '모', '형제자매', '조부모', '기타'] },
+      { id: 'event_target', label: '지원대상 경조사', type: 'select', required: true, sensitive: false, options: ['본인 결혼', '자녀 결혼', '출산', '부모상', '배우자상', '자녀상', '형제자매상', '조부모상', '기타'] },
       { id: 'amount', label: '신청금액', type: 'number', required: true, sensitive: false },
       ...commonAccountFields,
     ]
