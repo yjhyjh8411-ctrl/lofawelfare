@@ -50,7 +50,7 @@ function MainPageInner() {
   const [myApps, setMyApps] = useState<Application[]>([])
   const [approvedByForm, setApprovedByForm] = useState<Record<string, number>>({})
   const [announcement, setAnnouncement] = useState('')
-  const [popupNotice, setPopupNotice] = useState<{ 제목: string; 내용: string; 시작일: string; 종료일: string; 활성: boolean } | null>(null)
+  const [popupNotice, setPopupNotice] = useState<{ id?: string; 제목: string; 내용: string; 시작일: string; 종료일: string; 활성: boolean } | null>(null)
   const [showPopup, setShowPopup] = useState(false)
   const [regulations, setRegulations] = useState<{ id: string; 버전명: string; files: { name: string; url: string }[] }[]>([])
   const [budgetGroups, setBudgetGroups] = useState<BudgetGroup[]>([])
@@ -109,21 +109,26 @@ function MainPageInner() {
         })
         setApprovedByForm(byForm)
 
-        // Announcement + Popup notice
+        // Announcement + Popup notices (다수 지원)
         const settingsDoc = await getDoc(doc(db, 'settings', 'global'))
         if (settingsDoc.exists()) {
-          setAnnouncement(settingsDoc.data()?.공지사항 || '')
-          const popup = settingsDoc.data()?.팝업공지
-          if (popup?.활성 && popup.시작일 && popup.종료일) {
-            const today = new Date().toISOString().slice(0, 10)
-            if (today >= popup.시작일 && today <= popup.종료일) {
-              const dismissKey = `popup_dismissed_${popup.시작일}_${popup.종료일}`
-              const dismissed = localStorage.getItem(dismissKey)
-              if (!dismissed || Date.now() - Number(dismissed) > 24 * 60 * 60 * 1000) {
-                setPopupNotice(popup)
-                setShowPopup(true)
-              }
-            }
+          const sd = settingsDoc.data()
+          setAnnouncement(sd?.공지사항 || '')
+          // 신규 팝업공지목록(배열) 우선, 레거시 팝업공지(단일) fallback
+          const list: { id?: string; 제목: string; 내용: string; 시작일: string; 종료일: string; 활성: boolean }[] =
+            Array.isArray(sd?.팝업공지목록) ? sd.팝업공지목록
+              : (sd?.팝업공지 && sd.팝업공지.제목 ? [sd.팝업공지] : [])
+          const today = new Date().toISOString().slice(0, 10)
+          // 활성 + 오늘 기간 내 + 사용자가 dismiss 안 한 항목 중 첫 번째
+          for (const p of list) {
+            if (!p?.활성 || !p.시작일 || !p.종료일) continue
+            if (today < p.시작일 || today > p.종료일) continue
+            const dismissKey = `popup_dismissed_${p.id || ''}_${p.시작일}_${p.종료일}`
+            const dismissed = localStorage.getItem(dismissKey)
+            if (dismissed && Date.now() - Number(dismissed) <= 24 * 60 * 60 * 1000) continue
+            setPopupNotice(p)
+            setShowPopup(true)
+            break
           }
         }
 
@@ -184,7 +189,7 @@ function MainPageInner() {
                   type="checkbox"
                   onChange={e => {
                     if (e.target.checked && popupNotice) {
-                      const dismissKey = `popup_dismissed_${popupNotice.시작일}_${popupNotice.종료일}`
+                      const dismissKey = `popup_dismissed_${(popupNotice as { id?: string }).id || ''}_${popupNotice.시작일}_${popupNotice.종료일}`
                       localStorage.setItem(dismissKey, String(Date.now()))
                     }
                   }}

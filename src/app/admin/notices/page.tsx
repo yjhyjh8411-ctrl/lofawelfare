@@ -32,12 +32,15 @@ interface FAQ {
 }
 
 interface PopupNotice {
+  id: string
   제목: string
   내용: string
   시작일: string
   종료일: string
   활성: boolean
 }
+
+const newPopupId = () => `popup_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
 export default function AdminNoticesPage() {
   const { user, profile, loading } = useAuth()
@@ -58,8 +61,10 @@ export default function AdminNoticesPage() {
   const [editFaq, setEditFaq] = useState<Partial<FAQ> | null>(null)
   const [deleteFaqConfirm, setDeleteFaqConfirm] = useState<string | null>(null)
 
-  // Popup notice state
-  const [popup, setPopup] = useState<PopupNotice>({ 제목: '', 내용: '', 시작일: '', 종료일: '', 활성: false })
+  // Popup notices state — 다수 팝업 지원
+  const [popups, setPopups] = useState<PopupNotice[]>([])
+  const [editPopup, setEditPopup] = useState<PopupNotice | null>(null)
+  const [deletePopupId, setDeletePopupId] = useState<string | null>(null)
   const [popupSaving, setPopupSaving] = useState(false)
 
   useEffect(() => {
@@ -69,10 +74,18 @@ export default function AdminNoticesPage() {
   useEffect(() => {
     if (!profile?.isAdmin) return
     loadData()
-    // Load popup notice settings
+    // Load popup notices — 신규 팝업공지목록 → 레거시 팝업공지 → 빈 배열 순으로
     getDoc(doc(db, 'settings', 'global')).then(snap => {
-      if (snap.exists() && snap.data()?.팝업공지) {
-        setPopup(snap.data().팝업공지 as PopupNotice)
+      if (!snap.exists()) return
+      const d = snap.data()
+      const list = d?.팝업공지목록
+      if (Array.isArray(list)) {
+        setPopups(list.map((p: PopupNotice) => ({ ...p, id: p.id || newPopupId() })))
+        return
+      }
+      const legacy = d?.팝업공지
+      if (legacy && typeof legacy === 'object' && legacy.제목) {
+        setPopups([{ ...(legacy as PopupNotice), id: legacy.id || newPopupId() }])
       }
     })
   }, [profile])
@@ -158,20 +171,48 @@ export default function AdminNoticesPage() {
     loadData()
   }
 
-  const handleSavePopup = async () => {
-    if (popup.활성 && (!popup.제목 || !popup.시작일 || !popup.종료일)) {
-      showMsg('제목, 시작일, 종료일을 입력해주세요.')
-      return
-    }
+  const persistPopups = async (next: PopupNotice[]) => {
     setPopupSaving(true)
     try {
-      await setDoc(doc(db, 'settings', 'global'), { 팝업공지: popup }, { merge: true })
-      showMsg('팝업 공지사항이 저장되었습니다.')
-    } catch {
-      showMsg('저장 중 오류가 발생했습니다.')
+      await setDoc(doc(db, 'settings', 'global'), { 팝업공지목록: next }, { merge: true })
     } finally {
       setPopupSaving(false)
     }
+  }
+
+  const handleSaveEditPopup = async () => {
+    if (!editPopup) return
+    if (!editPopup.제목.trim() || !editPopup.시작일 || !editPopup.종료일) {
+      showMsg('제목, 시작일, 종료일을 입력해주세요.')
+      return
+    }
+    if (editPopup.시작일 > editPopup.종료일) {
+      showMsg('시작일이 종료일보다 늦을 수 없습니다.')
+      return
+    }
+    const exists = popups.some(p => p.id === editPopup.id)
+    const next = exists
+      ? popups.map(p => p.id === editPopup.id ? editPopup : p)
+      : [...popups, editPopup]
+    setPopups(next)
+    await persistPopups(next)
+    setEditPopup(null)
+    showMsg(exists ? '팝업 공지가 수정되었습니다.' : '팝업 공지가 추가되었습니다.')
+  }
+
+  const handleTogglePopup = async (id: string) => {
+    const next = popups.map(p => p.id === id ? { ...p, 활성: !p.활성 } : p)
+    setPopups(next)
+    await persistPopups(next)
+  }
+
+  const handleDeletePopup = async () => {
+    if (!deletePopupId) return
+    const next = popups.filter(p => p.id !== deletePopupId)
+    setPopups(next)
+    await persistPopups(next)
+    setDeletePopupId(null)
+    showMsg('팝업 공지가 삭제되었습니다.')
   }
 
   if (loading || !profile?.isAdmin) return null
@@ -198,7 +239,7 @@ export default function AdminNoticesPage() {
           {[
             { key: 'notices' as const, label: '공지사항', count: notices.length },
             { key: 'faq' as const, label: '자주하는 질문', count: faqs.length },
-            { key: 'popup' as const, label: '팝업 공지', count: popup.활성 ? 1 : 0 },
+            { key: 'popup' as const, label: '팝업 공지', count: popups.filter(p => p.활성).length },
           ].map(t => (
             <button
               key={t.key}
@@ -309,93 +350,68 @@ export default function AdminNoticesPage() {
         )}
 
         {tab === 'popup' && (
-          <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', padding: 28 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-              <div>
-                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>팝업 공지 설정</h3>
-                <p style={{ fontSize: 13, color: '#6b7280' }}>메인 페이지에 팝업으로 표시되는 공지사항을 설정합니다.</p>
-              </div>
-              <div
-                onClick={() => setPopup(p => ({ ...p, 활성: !p.활성 }))}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <p style={{ fontSize: 13, color: '#6b7280' }}>메인 페이지 진입 시 팝업으로 표시할 공지를 여러 개 등록할 수 있습니다. 활성화된 항목 중 오늘 날짜가 기간 내인 가장 최근 항목이 노출됩니다.</p>
+              <button
+                onClick={() => setEditPopup({ id: newPopupId(), 제목: '', 내용: '', 시작일: '', 종료일: '', 활성: true })}
+                style={{ background: '#1a56db', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', fontWeight: 600, cursor: 'pointer', fontSize: 14, whiteSpace: 'nowrap', marginLeft: 16 }}
               >
-                <span style={{ fontSize: 13, fontWeight: 600, color: popup.활성 ? '#059669' : '#9ca3af' }}>
-                  {popup.활성 ? '활성' : '비활성'}
-                </span>
-                <div style={{
-                  width: 44, height: 24, borderRadius: 12, padding: 2,
-                  background: popup.활성 ? '#059669' : '#d1d5db',
-                  transition: 'background 0.2s', display: 'flex', alignItems: 'center',
-                }}>
-                  <div style={{
-                    width: 20, height: 20, borderRadius: '50%', background: '#fff',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                    transform: popup.활성 ? 'translateX(20px)' : 'translateX(0)',
-                    transition: 'transform 0.2s',
-                  }} />
-                </div>
+                + 새 팝업 공지
+              </button>
+            </div>
+            {popups.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af', background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb' }}>
+                등록된 팝업 공지가 없습니다.
               </div>
-            </div>
-
-            <div style={{ marginBottom: 16 }}>
-              <label style={labelStyle}>제목</label>
-              <input
-                value={popup.제목}
-                onChange={e => setPopup(p => ({ ...p, 제목: e.target.value }))}
-                placeholder="팝업 공지 제목을 입력하세요"
-                style={inputStyle}
-              />
-            </div>
-
-            <div style={{ marginBottom: 16 }}>
-              <label style={labelStyle}>내용</label>
-              <textarea
-                value={popup.내용}
-                onChange={e => setPopup(p => ({ ...p, 내용: e.target.value }))}
-                placeholder="팝업 공지 내용을 입력하세요"
-                rows={6}
-                style={{ ...inputStyle, resize: 'vertical' }}
-              />
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 24 }}>
-              <div>
-                <label style={labelStyle}>시작일</label>
-                <input
-                  type="date"
-                  value={popup.시작일}
-                  onChange={e => setPopup(p => ({ ...p, 시작일: e.target.value }))}
-                  style={inputStyle}
-                />
-              </div>
-              <div>
-                <label style={labelStyle}>종료일</label>
-                <input
-                  type="date"
-                  value={popup.종료일}
-                  onChange={e => setPopup(p => ({ ...p, 종료일: e.target.value }))}
-                  style={inputStyle}
-                />
-              </div>
-            </div>
-
-            <button onClick={handleSavePopup} disabled={popupSaving} style={{ ...btnStyle, background: popupSaving ? '#9ca3af' : '#1a56db' }}>
-              {popupSaving ? '저장 중...' : '설정 저장'}
-            </button>
-
-            {popup.제목 && (
-              <div style={{ marginTop: 24, borderTop: '1px solid #e5e7eb', paddingTop: 20 }}>
-                <h4 style={{ fontSize: 13, fontWeight: 600, color: '#6b7280', marginBottom: 12 }}>미리보기</h4>
-                <div style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 24, background: '#fafafa' }}>
-                  <h3 style={{ fontSize: 18, fontWeight: 700, color: '#111827', marginBottom: 12 }}>{popup.제목}</h3>
-                  <p style={{ fontSize: 14, color: '#374151', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{popup.내용}</p>
-                  <div style={{ marginTop: 16, fontSize: 12, color: '#9ca3af' }}>
-                    기간: {popup.시작일 || '미설정'} ~ {popup.종료일 || '미설정'}
-                  </div>
-                </div>
+            ) : (
+              <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                {popups.map(p => {
+                  const today = new Date().toISOString().slice(0, 10)
+                  const inRange = p.시작일 && p.종료일 && today >= p.시작일 && today <= p.종료일
+                  const status = !p.활성 ? '비활성' : inRange ? '노출중' : (p.시작일 && today < p.시작일 ? '예정' : '종료')
+                  const statusColor = status === '노출중' ? '#059669' : status === '예정' ? '#f59e0b' : '#9ca3af'
+                  return (
+                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid #f3f4f6', gap: 12 }}>
+                      <div
+                        onClick={() => handleTogglePopup(p.id)}
+                        title={p.활성 ? '비활성화' : '활성화'}
+                        style={{ cursor: 'pointer', flexShrink: 0 }}
+                      >
+                        <div style={{
+                          width: 36, height: 20, borderRadius: 10, padding: 2,
+                          background: p.활성 ? '#059669' : '#d1d5db',
+                          display: 'flex', alignItems: 'center',
+                        }}>
+                          <div style={{
+                            width: 16, height: 16, borderRadius: '50%', background: '#fff',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+                            transform: p.활성 ? 'translateX(16px)' : 'translateX(0)',
+                            transition: 'transform 0.2s',
+                          }} />
+                        </div>
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 14, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.제목 || '(제목 없음)'}</div>
+                        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
+                          {p.시작일 || '시작일 미정'} ~ {p.종료일 || '종료일 미정'}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: statusColor, padding: '2px 8px', borderRadius: 6, background: statusColor === '#059669' ? '#d1fae5' : statusColor === '#f59e0b' ? '#fef3c7' : '#f3f4f6', flexShrink: 0 }}>{status}</span>
+                      <button
+                        onClick={() => setEditPopup(p)}
+                        style={{ background: '#eff6ff', color: '#1a56db', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                      >수정</button>
+                      <button
+                        onClick={() => setDeletePopupId(p.id)}
+                        style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                      >삭제</button>
+                    </div>
+                  )
+                })}
               </div>
             )}
-          </div>
+          </>
         )}
       </div>
 
@@ -543,6 +559,82 @@ export default function AdminNoticesPage() {
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={handleDeleteFaq} style={{ ...btnStyle, background: '#dc2626' }}>삭제</button>
             <button onClick={() => setDeleteFaqConfirm(null)} style={{ ...btnStyle, background: '#6b7280' }}>취소</button>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* Popup edit modal */}
+      {editPopup && (
+        <ModalOverlay onClose={() => setEditPopup(null)}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <h3 style={{ fontSize: 18, fontWeight: 700 }}>{popups.some(p => p.id === editPopup.id) ? '팝업 공지 수정' : '새 팝업 공지'}</h3>
+            <button onClick={() => setEditPopup(null)} style={closeBtnStyle}>✕</button>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={labelStyle}>제목</label>
+            <input
+              value={editPopup.제목}
+              onChange={e => setEditPopup(p => p ? { ...p, 제목: e.target.value } : p)}
+              placeholder="팝업 공지 제목"
+              style={inputStyle}
+            />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={labelStyle}>내용</label>
+            <textarea
+              value={editPopup.내용}
+              onChange={e => setEditPopup(p => p ? { ...p, 내용: e.target.value } : p)}
+              rows={6}
+              placeholder="팝업 공지 내용"
+              style={{ ...inputStyle, resize: 'vertical' }}
+            />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+            <div>
+              <label style={labelStyle}>시작일</label>
+              <input
+                type="date"
+                value={editPopup.시작일}
+                onChange={e => setEditPopup(p => p ? { ...p, 시작일: e.target.value } : p)}
+                style={inputStyle}
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>종료일</label>
+              <input
+                type="date"
+                value={editPopup.종료일}
+                onChange={e => setEditPopup(p => p ? { ...p, 종료일: e.target.value } : p)}
+                style={inputStyle}
+              />
+            </div>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={editPopup.활성}
+              onChange={e => setEditPopup(p => p ? { ...p, 활성: e.target.checked } : p)}
+              style={{ width: 16, height: 16, accentColor: '#1a56db' }}
+            />
+            <span style={{ fontSize: 14, fontWeight: 500 }}>활성화 (메인 페이지에 노출)</span>
+          </label>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button onClick={() => setEditPopup(null)} style={{ ...btnStyle, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db' }}>취소</button>
+            <button onClick={handleSaveEditPopup} disabled={popupSaving} style={{ ...btnStyle, background: popupSaving ? '#9ca3af' : '#1a56db' }}>
+              {popupSaving ? '저장 중...' : '저장'}
+            </button>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* Popup delete confirm */}
+      {deletePopupId && (
+        <ModalOverlay onClose={() => setDeletePopupId(null)}>
+          <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 12 }}>팝업 공지 삭제</h3>
+          <p style={{ color: '#374151', marginBottom: 20 }}>이 팝업 공지를 삭제하시겠습니까?</p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={handleDeletePopup} style={{ ...btnStyle, background: '#dc2626' }}>삭제</button>
+            <button onClick={() => setDeletePopupId(null)} style={{ ...btnStyle, background: '#6b7280' }}>취소</button>
           </div>
         </ModalOverlay>
       )}
