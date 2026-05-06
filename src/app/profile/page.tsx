@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { doc, getDoc, updateDoc } from 'firebase/firestore'
-import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth'
+import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, GoogleAuthProvider, linkWithPopup, unlink } from 'firebase/auth'
 import { db, auth } from '@/lib/firebase'
 import { useAuth } from '@/lib/auth-context'
 import Navbar from '@/components/Navbar'
@@ -20,6 +20,9 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false)
   const [changingPw, setChangingPw] = useState(false)
   const [dataLoaded, setDataLoaded] = useState(false)
+  const [linkProviders, setLinkProviders] = useState<string[]>([])
+  const [linkBusy, setLinkBusy] = useState(false)
+  const [linkMsg, setLinkMsg] = useState<{ type: 'ok' | 'err' | 'info'; text: string } | null>(null)
 
   useEffect(() => {
     if (!loading && !user) router.replace('/login')
@@ -41,9 +44,50 @@ export default function ProfilePage() {
         })
       }
       setDataLoaded(true)
+      setLinkProviders((auth.currentUser?.providerData || []).map(p => p.providerId))
     }
     load()
   }, [user])
+
+  const refreshProviders = () => {
+    setLinkProviders((auth.currentUser?.providerData || []).map(p => p.providerId))
+  }
+
+  const handleLinkGoogle = async () => {
+    if (!auth.currentUser) return
+    setLinkBusy(true); setLinkMsg(null)
+    try {
+      const result = await linkWithPopup(auth.currentUser, new GoogleAuthProvider())
+      const linkedEmail = result.user.providerData.find(p => p.providerId === 'google.com')?.email
+      refreshProviders()
+      setLinkMsg({ type: 'ok', text: `Google 계정 연동 완료${linkedEmail ? ` — ${linkedEmail}` : ''}. 이제 두 가지 방법 모두로 로그인 가능합니다.` })
+    } catch (err: unknown) {
+      const code = err && typeof err === 'object' && 'code' in err ? (err as { code: string }).code : ''
+      if (code === 'auth/popup-closed-by-user') {
+        setLinkMsg(null)
+      } else if (code === 'auth/credential-already-in-use' || code === 'auth/email-already-in-use') {
+        setLinkMsg({ type: 'err', text: '해당 Google 계정은 이미 다른 사용자에 연결되어 있습니다. 다른 Google 계정을 사용해주세요.' })
+      } else if (code === 'auth/provider-already-linked') {
+        setLinkMsg({ type: 'info', text: '이미 Google 계정이 연동되어 있습니다.' })
+        refreshProviders()
+      } else {
+        setLinkMsg({ type: 'err', text: '연동에 실패했습니다. 잠시 후 다시 시도해주세요.' })
+      }
+    } finally { setLinkBusy(false) }
+  }
+
+  const handleUnlinkGoogle = async () => {
+    if (!auth.currentUser) return
+    if (!confirm('Google 계정 연동을 해제하시겠습니까? 이후에는 이메일·비밀번호로만 로그인할 수 있습니다.')) return
+    setLinkBusy(true); setLinkMsg(null)
+    try {
+      await unlink(auth.currentUser, 'google.com')
+      refreshProviders()
+      setLinkMsg({ type: 'ok', text: 'Google 계정 연동을 해제했습니다.' })
+    } catch {
+      setLinkMsg({ type: 'err', text: '연동 해제에 실패했습니다.' })
+    } finally { setLinkBusy(false) }
+  }
 
   const showMsg = (setter: (v: string) => void, m: string) => {
     setter(m)
@@ -92,8 +136,10 @@ export default function ProfilePage() {
     } finally { setChangingPw(false) }
   }
 
-  // Google 로그인 사용자는 비밀번호 변경 불가
-  const isGoogleUser = auth.currentUser?.providerData?.some(p => p.providerId === 'google.com')
+  // 비밀번호 변경은 password provider 연결된 경우만 가능
+  // (Google 단독 사용자는 변경 불가, password+google 둘 다 있으면 가능)
+  const hasPasswordProvider = linkProviders.includes('password')
+  const isGoogleUser = !hasPasswordProvider && linkProviders.includes('google.com')
 
   if (loading || !dataLoaded) return (
     <div style={{ minHeight: '100vh', background: '#f0f2f5' }}>
@@ -218,8 +264,94 @@ export default function ProfilePage() {
             </>
           )}
         </div>
+
+        {/* 로그인 방법 / 계정 연동 */}
+        <div style={{ background: '#fff', borderRadius: 16, padding: '28px 28px', border: '1px solid #e5e7eb', marginTop: 20, animation: 'fadeUp 0.4s ease-out 0.15s both' }}>
+          <h3 style={{ fontSize: 17, fontWeight: 700, color: '#111827', marginBottom: 8 }}>로그인 방법</h3>
+          <p style={{ fontSize: 13, color: '#9ca3af', marginBottom: 16 }}>
+            연동된 로그인 방법을 확인하고 추가/해제할 수 있습니다.
+          </p>
+
+          {/* 이메일/비밀번호 행 */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: '#f8f9fa', borderRadius: 10, marginBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 22 }}>📧</span>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>이메일 · 비밀번호</div>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>{auth.currentUser?.email || '-'}</div>
+              </div>
+            </div>
+            {linkProviders.includes('password') ? (
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#15803d', background: '#dcfce7', padding: '4px 12px', borderRadius: 999 }}>✓ 연결됨</span>
+            ) : (
+              <span style={{ fontSize: 12, color: '#9ca3af' }}>미사용</span>
+            )}
+          </div>
+
+          {/* Google 행 */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: '#f8f9fa', borderRadius: 10, marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <GoogleSmall />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>Google 계정</div>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>
+                  {linkProviders.includes('google.com')
+                    ? (auth.currentUser?.providerData.find(p => p.providerId === 'google.com')?.email || '연결된 Google 계정')
+                    : '연동되지 않음'}
+                </div>
+              </div>
+            </div>
+            {linkProviders.includes('google.com') ? (
+              linkProviders.includes('password') ? (
+                <button
+                  onClick={handleUnlinkGoogle}
+                  disabled={linkBusy}
+                  style={{ background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontWeight: 700, cursor: linkBusy ? 'not-allowed' : 'pointer' }}
+                >
+                  {linkBusy ? '처리 중...' : '연동 해제'}
+                </button>
+              ) : (
+                <span style={{ fontSize: 11, color: '#9ca3af' }}>유일한 로그인 수단 — 해제 불가</span>
+              )
+            ) : (
+              <button
+                onClick={handleLinkGoogle}
+                disabled={linkBusy}
+                style={{ background: '#1a56db', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: linkBusy ? 'not-allowed' : 'pointer' }}
+              >
+                {linkBusy ? '연동 중...' : '+ Google 계정 연동'}
+              </button>
+            )}
+          </div>
+
+          {linkMsg && (
+            <div style={{
+              background: linkMsg.type === 'ok' ? '#f0fdf4' : linkMsg.type === 'info' ? '#f0f9ff' : '#fef2f2',
+              border: `1px solid ${linkMsg.type === 'ok' ? '#a7f3d0' : linkMsg.type === 'info' ? '#bae6fd' : '#fecaca'}`,
+              color: linkMsg.type === 'ok' ? '#065f46' : linkMsg.type === 'info' ? '#0369a1' : '#dc2626',
+              borderRadius: 10, padding: '10px 14px', fontSize: 13, marginBottom: 4,
+            }}>
+              {linkMsg.text}
+            </div>
+          )}
+
+          <div style={{ marginTop: 12, padding: '10px 14px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, fontSize: 12, color: '#92400e', lineHeight: 1.6 }}>
+            💡 <strong>Tip</strong> — 이메일·비밀번호로 가입한 계정에 같은 사람의 Google 계정을 연동하면, 두 가지 방법 모두로 같은 계정에 로그인할 수 있습니다. (Google 가입자도 동일하게 비밀번호 추가 가능)
+          </div>
+        </div>
       </div>
     </div>
+  )
+}
+
+function GoogleSmall() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 18 18">
+      <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
+      <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/>
+      <path fill="#FBBC05" d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z"/>
+      <path fill="#EA4335" d="M9 3.583c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.163 6.656 3.583 9 3.583z"/>
+    </svg>
   )
 }
 
