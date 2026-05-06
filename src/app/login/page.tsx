@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth'
+import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, sendPasswordResetEmail } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase'
 
@@ -12,6 +12,11 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
+  // 비밀번호 찾기 모달
+  const [resetOpen, setResetOpen] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetSending, setResetSending] = useState(false)
+  const [resetMsg, setResetMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const router = useRouter()
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -40,6 +45,42 @@ export default function LoginPage() {
       setError('이메일 또는 비밀번호가 올바르지 않습니다.')
     }
     finally { setLoading(false) }
+  }
+
+  const handlePasswordReset = async () => {
+    setResetMsg(null)
+    const targetEmail = resetEmail.trim()
+    if (!targetEmail) {
+      setResetMsg({ type: 'err', text: '이메일 주소를 입력해주세요.' })
+      return
+    }
+    setResetSending(true)
+    try {
+      // 사번 입력 등 별칭으로 이메일을 입력했을 가능성 → 실제 인증용 이메일 조회
+      let authEmail = targetEmail
+      try {
+        const res = await fetch('/api/lookup-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: targetEmail }),
+        })
+        const data = await res.json()
+        if (data?.authEmail) authEmail = data.authEmail
+      } catch { /* lookup 실패 시 입력값 그대로 사용 */ }
+      await sendPasswordResetEmail(auth, authEmail)
+      setResetMsg({ type: 'ok', text: `${authEmail} 으로 재설정 링크를 보냈습니다. 메일함을 확인해주세요. (스팸함 포함)` })
+    } catch (err: unknown) {
+      const code = err && typeof err === 'object' && 'code' in err ? (err as { code: string }).code : ''
+      if (code === 'auth/user-not-found' || code === 'auth/invalid-email') {
+        setResetMsg({ type: 'err', text: '등록되지 않은 이메일입니다. 사내근로복지기금 담당자에게 문의해주세요.' })
+      } else if (code === 'auth/too-many-requests') {
+        setResetMsg({ type: 'err', text: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' })
+      } else {
+        setResetMsg({ type: 'err', text: '재설정 메일 발송에 실패했습니다. 사내근로복지기금 담당자에게 문의해주세요.' })
+      }
+    } finally {
+      setResetSending(false)
+    }
   }
 
   const handleGoogleLogin = async () => {
@@ -125,6 +166,16 @@ export default function LoginPage() {
           >
             {loading ? '로그인 중...' : '로그인'}
           </button>
+
+          <div style={{ textAlign: 'right', marginTop: 10 }}>
+            <button
+              type="button"
+              onClick={() => { setResetEmail(email); setResetMsg(null); setResetOpen(true) }}
+              style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              비밀번호를 잊으셨나요?
+            </button>
+          </div>
         </form>
 
         <div style={{ display: 'flex', alignItems: 'center', margin: '20px 0' }}>
@@ -160,6 +211,73 @@ export default function LoginPage() {
           </button>
         </div>
       </div>
+
+      {/* 비밀번호 찾기 모달 */}
+      {resetOpen && (
+        <div
+          onClick={() => setResetOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: 14, padding: '28px 30px', width: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <h3 style={{ fontSize: 17, fontWeight: 800, color: '#111827' }}>🔑 비밀번호 재설정</h3>
+              <button onClick={() => setResetOpen(false)} style={{ background: 'none', border: 'none', fontSize: 20, color: '#6b7280', cursor: 'pointer' }}>✕</button>
+            </div>
+            <p style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.6, marginBottom: 18 }}>
+              가입하신 이메일 주소를 입력하시면 비밀번호 재설정 링크를 보내드립니다.<br />
+              ⚠ Google 계정으로 가입한 경우 비밀번호 없음 — Google 로그인을 사용하세요.
+            </p>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>이메일</label>
+            <input
+              type="email"
+              value={resetEmail}
+              onChange={e => setResetEmail(e.target.value)}
+              placeholder="가입하신 이메일 주소"
+              autoFocus
+              onKeyDown={e => { if (e.key === 'Enter' && !resetSending) handlePasswordReset() }}
+              style={{ ...inputStyle, marginBottom: 14 }}
+            />
+            {resetMsg && (
+              <div style={{
+                background: resetMsg.type === 'ok' ? '#f0fdf4' : '#fef2f2',
+                border: `1px solid ${resetMsg.type === 'ok' ? '#bbf7d0' : '#fecaca'}`,
+                color: resetMsg.type === 'ok' ? '#15803d' : '#dc2626',
+                fontSize: 12.5, lineHeight: 1.5,
+                padding: '10px 12px', borderRadius: 8, marginBottom: 14,
+              }}>
+                {resetMsg.text}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setResetOpen(false)}
+                style={{ background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+              >닫기</button>
+              <button
+                onClick={handlePasswordReset}
+                disabled={resetSending}
+                style={{
+                  background: resetSending ? '#9ca3af' : '#1a56db',
+                  color: '#fff', border: 'none', borderRadius: 8,
+                  padding: '9px 22px', fontSize: 13, fontWeight: 700,
+                  cursor: resetSending ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {resetSending ? '전송 중...' : '재설정 링크 보내기'}
+              </button>
+            </div>
+            <div style={{ marginTop: 16, padding: '10px 12px', background: '#f9fafb', borderRadius: 8, fontSize: 11, color: '#6b7280', lineHeight: 1.6 }}>
+              💡 메일이 오지 않으면 <strong>스팸함</strong>을 확인하시거나, <strong>사내근로복지기금 담당자</strong>에게 문의해주세요.
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
