@@ -38,25 +38,19 @@ export default function SignupPage() {
     setLoading(true)
     setError('')
     try {
-      // 같은 이메일로 이미 가입된 사용자(특히 Google 가입자)가 있는지 사전 확인
+      // 같은 이메일 또는 사번으로 이미 가입된 사용자가 있는지 사전 확인
       try {
         const checkEmail = form.email.trim().toLowerCase()
-        // exact match
-        const q1 = query(collection(db, 'users'), where('이메일', '==', checkEmail))
-        const s1 = await getDocs(q1)
-        let exists = !s1.empty
-        // case 살린 원본 매치도 시도
-        if (!exists && checkEmail !== form.email) {
-          const q2 = query(collection(db, 'users'), where('이메일', '==', form.email))
-          const s2 = await getDocs(q2)
-          exists = !s2.empty
+        const checkEmp = form.employeeId.trim()
+        const all = await getDocs(collection(db, 'users'))
+        const dupEmail = all.docs.find(d => (d.data().이메일 || '').toLowerCase().trim() === checkEmail)
+        const dupEmp = checkEmp ? all.docs.find(d => (d.data().사번 || '').trim() === checkEmp) : null
+        if (dupEmp) {
+          setError(`사번 ${checkEmp} 으로 이미 가입된 계정이 있습니다. 기존 계정으로 로그인하거나 [비밀번호 찾기]를 이용해주세요.`)
+          setLoading(false)
+          return
         }
-        // fallback: 전체 client 비교
-        if (!exists) {
-          const all = await getDocs(collection(db, 'users'))
-          exists = all.docs.some(d => (d.data().이메일 || '').toLowerCase().trim() === checkEmail)
-        }
-        if (exists) {
+        if (dupEmail) {
           setError('이미 같은 이메일로 가입된 계정이 있습니다. Google 로그인 또는 [비밀번호 찾기]를 이용해주세요.')
           setLoading(false)
           return

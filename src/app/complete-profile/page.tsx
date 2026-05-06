@@ -51,34 +51,31 @@ export default function CompleteProfilePage() {
     setLoading(true)
     setError('')
     try {
-      // 같은 이메일을 가진 다른 사용자가 이미 있는지 최종 확인
+      // 같은 이메일 또는 사번으로 가입된 다른 사용자가 있는지 최종 확인
       const checkEmail = (form.email || googleEmail).trim().toLowerCase()
-      if (checkEmail) {
-        try {
-          const dupQ = query(collection(db, 'users'), where('이메일', '==', checkEmail))
-          const dupSnap = await getDocs(dupQ)
-          // case-insensitive 비교를 위해 client-side 도 한 번 더
-          const dupExists = dupSnap.docs.some(d => d.id !== uid)
-          if (!dupExists) {
-            // exact-match query 가 case 차이로 못 잡았을 수 있어 collection 전체 client filter 시도
-            const allSnap = await getDocs(collection(db, 'users'))
-            const dupAny = allSnap.docs.some(d => d.id !== uid && (d.data().이메일 || '').toLowerCase().trim() === checkEmail)
-            if (dupAny) throw new Error('DUPLICATE_EMAIL')
-          } else {
-            throw new Error('DUPLICATE_EMAIL')
-          }
-        } catch (e) {
-          if (e instanceof Error && e.message === 'DUPLICATE_EMAIL') {
-            // Auth 계정 자체를 삭제하여 깨끗하게 정리
-            try { if (auth.currentUser) await deleteUser(auth.currentUser) } catch { /* 실패해도 계속 */ }
-            try { await signOut(auth) } catch { /* */ }
-            setError(`이미 ${checkEmail} 으로 가입된 계정이 있습니다. 기존 계정으로 로그인 후 [내 정보 설정] → [로그인 방법]에서 Google 계정 연동을 사용해주세요.`)
-            setLoading(false)
-            setTimeout(() => router.push('/login'), 3000)
-            return
-          }
-          // 조회 실패는 무시 (네트워크 등)
+      const checkEmp = form.employeeId.trim()
+      try {
+        const allSnap = await getDocs(collection(db, 'users'))
+        const dupByEmail = checkEmail
+          ? allSnap.docs.find(d => d.id !== uid && (d.data().이메일 || '').toLowerCase().trim() === checkEmail)
+          : null
+        const dupByEmp = checkEmp
+          ? allSnap.docs.find(d => d.id !== uid && (d.data().사번 || '').trim() === checkEmp)
+          : null
+        if (dupByEmp || dupByEmail) {
+          // Auth 계정 자체를 삭제하여 깨끗하게 정리
+          try { if (auth.currentUser) await deleteUser(auth.currentUser) } catch { /* 실패해도 계속 */ }
+          try { await signOut(auth) } catch { /* */ }
+          const reason = dupByEmp
+            ? `사번 ${checkEmp} 으로 이미 가입된 계정이 있습니다.`
+            : `이미 ${checkEmail} 으로 가입된 계정이 있습니다.`
+          setError(`${reason}\n기존 계정으로 로그인 후 [내 정보 설정] → [로그인 방법]에서 Google 계정 연동을 사용해주세요.`)
+          setLoading(false)
+          setTimeout(() => router.push('/login'), 4000)
+          return
         }
+      } catch (err) {
+        console.error('[complete-profile-dup-check] failed:', err)
       }
       await setDoc(doc(db, 'users', uid), {
         사번: form.employeeId,
@@ -169,6 +166,7 @@ export default function CompleteProfilePage() {
               background: '#fef2f2', border: '1px solid #fecaca',
               borderRadius: 6, padding: '10px 14px',
               color: '#dc2626', fontSize: 13, marginBottom: 14,
+              whiteSpace: 'pre-line', lineHeight: 1.5,
             }}>
               {error}
             </div>
