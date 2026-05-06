@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { collection, getDocs, query, where, orderBy, getDoc, doc, updateDoc } from 'firebase/firestore'
+import { collection, getDocs, query, where, orderBy, getDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/lib/auth-context'
 import Navbar from '@/components/Navbar'
@@ -234,7 +234,7 @@ function MainPageInner() {
           ) : (
             <div style={{ ...card, overflow: 'hidden' }}>
               {/* 헤더 */}
-              <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr 130px 90px 1fr 80px', padding: '10px 20px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: 12, fontWeight: 600, color: '#6b7280' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr 130px 90px 1fr 140px', padding: '10px 20px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: 12, fontWeight: 600, color: '#6b7280' }}>
                 <span>신청일시</span><span>항목</span><span style={{ textAlign: 'right' }}>신청금액</span><span style={{ textAlign: 'center' }}>상태</span><span>비고</span><span style={{ textAlign: 'center' }}>관리</span>
               </div>
               {myApps.slice(0, 6).map(app => {
@@ -246,7 +246,7 @@ function MainPageInner() {
                   : app.status === 'rejected' ? (app.reject_reason || '반려되었습니다.')
                   : app.status === 'cancelled' ? '취소되었습니다.' : ''
                 return (
-                  <div key={app.id} style={{ display: 'grid', gridTemplateColumns: '140px 1fr 130px 90px 1fr 80px', padding: '14px 20px', borderBottom: '1px solid #f3f4f6', alignItems: 'center', fontSize: 13 }}>
+                  <div key={app.id} style={{ display: 'grid', gridTemplateColumns: '140px 1fr 130px 90px 1fr 140px', padding: '14px 20px', borderBottom: '1px solid #f3f4f6', alignItems: 'center', fontSize: 13 }}>
                     <span style={{ color: '#9ca3af', fontSize: 12 }}>
                       {date ? `${date.toLocaleDateString('ko-KR')} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}` : '-'}
                     </span>
@@ -258,16 +258,37 @@ function MainPageInner() {
                       <span style={{ background: s.bg, color: s.color, padding: '3px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700 }}>{s.text}</span>
                     </div>
                     <span style={{ color: app.status === 'rejected' ? '#dc2626' : '#6b7280', fontSize: 12 }}>{note}</span>
-                    <div style={{ display: 'flex', justifyContent: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: 6 }}>
                       {app.status === 'pending' && (
+                        <>
+                          <button
+                            onClick={() => router.push(`/apply/_/?formId=${app.form_id}&edit=${app.id}`)}
+                            style={{ background: 'none', border: '1px solid #bfdbfe', borderRadius: 6, color: '#1d4ed8', fontSize: 12, padding: '3px 10px', cursor: 'pointer' }}
+                          >수정</button>
+                          <button
+                            onClick={async () => {
+                              if (!confirm('신청을 취소하시겠습니까?')) return
+                              await updateDoc(doc(db, 'applications', app.id), { status: 'cancelled' })
+                              setMyApps(p => p.map(a => a.id === app.id ? { ...a, status: 'cancelled' } : a))
+                            }}
+                            style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: 6, color: '#ef4444', fontSize: 12, padding: '3px 10px', cursor: 'pointer' }}
+                          >취소</button>
+                        </>
+                      )}
+                      {(app.status === 'cancelled' || app.status === 'rejected') && (
                         <button
                           onClick={async () => {
-                            if (!confirm('신청을 취소하시겠습니까?')) return
-                            await updateDoc(doc(db, 'applications', app.id), { status: 'cancelled' })
-                            setMyApps(p => p.filter(a => a.id !== app.id))
+                            if (!confirm('이 신청 내역을 영구 삭제하시겠습니까?\n삭제 후에는 복구할 수 없습니다.')) return
+                            try {
+                              await deleteDoc(doc(db, 'applications', app.id))
+                              setMyApps(p => p.filter(a => a.id !== app.id))
+                            } catch (e) {
+                              console.error('Delete failed:', e)
+                              alert('삭제 중 오류가 발생했습니다.')
+                            }
                           }}
-                          style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: 6, color: '#ef4444', fontSize: 12, padding: '3px 10px', cursor: 'pointer' }}
-                        >취소</button>
+                          style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: 6, color: '#6b7280', fontSize: 12, padding: '3px 10px', cursor: 'pointer' }}
+                        >삭제</button>
                       )}
                     </div>
                   </div>
