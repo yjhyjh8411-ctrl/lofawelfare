@@ -40,14 +40,28 @@ export default function SignupPage() {
     try {
       // 같은 이메일로 이미 가입된 사용자(특히 Google 가입자)가 있는지 사전 확인
       try {
-        const q = query(collection(db, 'users'), where('이메일', '==', form.email))
-        const snap = await getDocs(q)
-        if (!snap.empty) {
-          setError('이미 같은 이메일로 가입된 계정이 있습니다. Google 로그인 또는 비밀번호 찾기를 이용해주세요.')
+        const checkEmail = form.email.trim().toLowerCase()
+        // exact match
+        const q1 = query(collection(db, 'users'), where('이메일', '==', checkEmail))
+        const s1 = await getDocs(q1)
+        let exists = !s1.empty
+        // case 살린 원본 매치도 시도
+        if (!exists && checkEmail !== form.email) {
+          const q2 = query(collection(db, 'users'), where('이메일', '==', form.email))
+          const s2 = await getDocs(q2)
+          exists = !s2.empty
+        }
+        // fallback: 전체 client 비교
+        if (!exists) {
+          const all = await getDocs(collection(db, 'users'))
+          exists = all.docs.some(d => (d.data().이메일 || '').toLowerCase().trim() === checkEmail)
+        }
+        if (exists) {
+          setError('이미 같은 이메일로 가입된 계정이 있습니다. Google 로그인 또는 [비밀번호 찾기]를 이용해주세요.')
           setLoading(false)
           return
         }
-      } catch { /* 조회 실패 시 진행 */ }
+      } catch (err) { console.error('[signup-dup-check] failed:', err) }
       const cred = await createUserWithEmailAndPassword(auth, form.email, form.password)
       await setDoc(doc(db, 'users', cred.user.uid), {
         사번: form.employeeId,

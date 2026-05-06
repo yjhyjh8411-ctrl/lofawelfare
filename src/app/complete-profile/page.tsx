@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase'
-import { onAuthStateChanged } from 'firebase/auth'
+import { onAuthStateChanged, signOut, deleteUser } from 'firebase/auth'
 
 export default function CompleteProfilePage() {
   // signup 페이지와 동일한 입력 항목·필수 검증으로 통일
@@ -51,6 +51,35 @@ export default function CompleteProfilePage() {
     setLoading(true)
     setError('')
     try {
+      // 같은 이메일을 가진 다른 사용자가 이미 있는지 최종 확인
+      const checkEmail = (form.email || googleEmail).trim().toLowerCase()
+      if (checkEmail) {
+        try {
+          const dupQ = query(collection(db, 'users'), where('이메일', '==', checkEmail))
+          const dupSnap = await getDocs(dupQ)
+          // case-insensitive 비교를 위해 client-side 도 한 번 더
+          const dupExists = dupSnap.docs.some(d => d.id !== uid)
+          if (!dupExists) {
+            // exact-match query 가 case 차이로 못 잡았을 수 있어 collection 전체 client filter 시도
+            const allSnap = await getDocs(collection(db, 'users'))
+            const dupAny = allSnap.docs.some(d => d.id !== uid && (d.data().이메일 || '').toLowerCase().trim() === checkEmail)
+            if (dupAny) throw new Error('DUPLICATE_EMAIL')
+          } else {
+            throw new Error('DUPLICATE_EMAIL')
+          }
+        } catch (e) {
+          if (e instanceof Error && e.message === 'DUPLICATE_EMAIL') {
+            // Auth 계정 자체를 삭제하여 깨끗하게 정리
+            try { if (auth.currentUser) await deleteUser(auth.currentUser) } catch { /* 실패해도 계속 */ }
+            try { await signOut(auth) } catch { /* */ }
+            setError(`이미 ${checkEmail} 으로 가입된 계정이 있습니다. 기존 계정으로 로그인 후 [내 정보 설정] → [로그인 방법]에서 Google 계정 연동을 사용해주세요.`)
+            setLoading(false)
+            setTimeout(() => router.push('/login'), 3000)
+            return
+          }
+          // 조회 실패는 무시 (네트워크 등)
+        }
+      }
       await setDoc(doc(db, 'users', uid), {
         사번: form.employeeId,
         성명: form.name,

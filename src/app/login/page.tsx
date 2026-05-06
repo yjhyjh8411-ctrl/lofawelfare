@@ -95,14 +95,28 @@ export default function LoginPage() {
         return
       }
       // 신규 Google 사용자 — 같은 이메일로 이미 가입된 사용자가 있는지 확인
-      const googleEmail = result.user.email || ''
+      const googleEmail = (result.user.email || '').trim().toLowerCase()
       let dupDocId = ''
       if (googleEmail) {
         try {
-          const q = query(collection(db, 'users'), where('이메일', '==', googleEmail))
-          const dupSnap = await getDocs(q)
-          dupDocId = dupSnap.docs.find(d => d.id !== result.user.uid)?.id || ''
-        } catch { /* 조회 실패 시 진행 */ }
+          // 1차: case-sensitive exact match (대부분의 경우)
+          const q1 = query(collection(db, 'users'), where('이메일', '==', googleEmail))
+          const s1 = await getDocs(q1)
+          dupDocId = s1.docs.find(d => d.id !== result.user.uid)?.id || ''
+          // 2차: 원본 이메일(케이스 살림) 로도 검색
+          if (!dupDocId && googleEmail !== (result.user.email || '')) {
+            const q2 = query(collection(db, 'users'), where('이메일', '==', result.user.email))
+            const s2 = await getDocs(q2)
+            dupDocId = s2.docs.find(d => d.id !== result.user.uid)?.id || ''
+          }
+          // 3차 fallback: 전체 users client-side 비교 (대소문자 무시)
+          if (!dupDocId) {
+            const allSnap = await getDocs(collection(db, 'users'))
+            dupDocId = allSnap.docs.find(d => d.id !== result.user.uid && (d.data().이메일 || '').toLowerCase().trim() === googleEmail)?.id || ''
+          }
+        } catch (err) {
+          console.error('[duplicate-check] failed:', err)
+        }
       }
       if (dupDocId) {
         // 중복 — 새로 만들어진 Google 인증 사용자를 정리하고 안내
