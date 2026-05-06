@@ -7,23 +7,21 @@ import { auth, db } from '@/lib/firebase'
 import { onAuthStateChanged } from 'firebase/auth'
 
 export default function CompleteProfilePage() {
+  // signup 페이지와 동일한 입력 항목·필수 검증으로 통일
   const [form, setForm] = useState({
     employeeId: '',
     name: '',
-    email: '',
     department: '',
-    departmentCustom: '',
-    business: '',
     position: '',
-    joinDate: '',
     phone: '',
+    hireDate: '',
+    email: '',
   })
   const [googleEmail, setGoogleEmail] = useState('')
   const [uid, setUid] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
-
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -45,8 +43,9 @@ export default function CompleteProfilePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.employeeId || !form.name || !form.department || !form.position) {
-      setError('사번, 이름, 부서, 직급은 필수 항목입니다.')
+    if (!form.employeeId || !form.name || !form.department || !form.position
+        || !form.phone || !form.hireDate || !form.email) {
+      setError('모든 항목을 입력해주세요.')
       return
     }
     setLoading(true)
@@ -56,11 +55,10 @@ export default function CompleteProfilePage() {
         사번: form.employeeId,
         성명: form.name,
         부서: form.department,
-        사업: form.business,
         직급: form.position,
-        이메일: form.email || googleEmail,
-        입사일: form.joinDate,
         전화번호: form.phone,
+        입사일: form.hireDate,
+        이메일: form.email || googleEmail,
         isAdmin: false,
         status: 'active',
         createdAt: serverTimestamp(),
@@ -82,13 +80,13 @@ export default function CompleteProfilePage() {
     }}>
       <div style={{
         background: '#fff', borderRadius: 12, padding: '40px 36px',
-        width: 480, boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+        width: 460, boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
       }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 6, textAlign: 'center' }}>
           추가 정보 입력
         </h1>
         <p style={{ color: '#6b7280', fontSize: 13, textAlign: 'center', marginBottom: 24 }}>
-          처음 로그인하셨습니다. 아래 정보를 입력해주세요.
+          한국지방재정공제회 복지시스템 — 직원 정보를 입력해주세요.
         </p>
 
         {googleEmail && (
@@ -101,52 +99,40 @@ export default function CompleteProfilePage() {
         )}
 
         <form onSubmit={handleSubmit}>
-          {/* 사번 */}
           <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>사번 <Required /></label>
+            <label style={labelStyle}>사번</label>
             <input type="text" name="employeeId" value={form.employeeId} onChange={handleChange} placeholder="사번을 입력하세요" style={inputStyle} />
           </div>
 
-          {/* 이름 */}
           <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>이름 <Required /></label>
+            <label style={labelStyle}>이름</label>
             <input type="text" name="name" value={form.name} onChange={handleChange} placeholder="성명을 입력하세요" style={inputStyle} />
           </div>
 
-          {/* 이메일 */}
           <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>이메일</label>
-            <input type="email" name="email" value={form.email} onChange={handleChange} placeholder="이메일 주소" style={inputStyle} />
-          </div>
-
-          {/* 부서 */}
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>부서 <Required /></label>
+            <label style={labelStyle}>부서</label>
             <input type="text" name="department" value={form.department} onChange={handleChange} placeholder="부서명을 입력하세요" style={inputStyle} />
           </div>
 
-          {/* 사업 */}
           <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>사업</label>
-            <input type="text" name="business" value={form.business} onChange={handleChange} placeholder="담당 사업명 (선택)" style={inputStyle} />
-          </div>
-
-          {/* 직급 */}
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>직급 <Required /></label>
+            <label style={labelStyle}>직급</label>
             <input type="text" name="position" value={form.position} onChange={handleChange} placeholder="직급을 입력하세요" style={inputStyle} />
           </div>
 
-          {/* 입사일 */}
           <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>입사일</label>
-            <input type="date" name="joinDate" value={form.joinDate} onChange={handleChange} style={inputStyle} />
-          </div>
-
-          {/* 전화번호 */}
-          <div style={{ marginBottom: 20 }}>
             <label style={labelStyle}>전화번호</label>
             <input type="tel" name="phone" value={form.phone} onChange={handleChange} placeholder="예: 010-1234-5678" style={inputStyle} />
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={labelStyle}>입사일</label>
+            <input type="date" name="hireDate" value={form.hireDate} onChange={handleChange} style={inputStyle} />
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={labelStyle}>이메일 (실제 이메일 주소)</label>
+            <input type="email" name="email" value={form.email} onChange={handleChange} placeholder="예: hong@lofa.or.kr" style={inputStyle} />
+            <p style={{ color: '#9ca3af', fontSize: 11, marginTop: 4 }}>로그인·알림 발송에 사용됩니다.</p>
           </div>
 
           {error && (
@@ -166,7 +152,7 @@ export default function CompleteProfilePage() {
               width: '100%', background: loading ? '#93c5fd' : '#1a56db',
               color: '#fff', border: 'none', borderRadius: 8,
               padding: '12px', fontSize: 15, fontWeight: 600,
-              cursor: loading ? 'not-allowed' : 'pointer',
+              cursor: loading ? 'not-allowed' : 'pointer', marginTop: 6,
             }}
           >
             {loading ? '저장 중...' : '완료하기'}
@@ -175,10 +161,6 @@ export default function CompleteProfilePage() {
       </div>
     </div>
   )
-}
-
-function Required() {
-  return <span style={{ color: '#ef4444', marginLeft: 2 }}>*</span>
 }
 
 const labelStyle: React.CSSProperties = {
