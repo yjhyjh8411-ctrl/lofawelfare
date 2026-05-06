@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { collection, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore'
+import { collection, getDocs, doc, updateDoc, deleteDoc, query, where, writeBatch } from 'firebase/firestore'
 import { getIdToken } from 'firebase/auth'
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/lib/auth-context'
@@ -62,6 +62,38 @@ export default function EmployeesPage() {
   }, [profile])
 
   const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000) }
+
+  /** 같은 이메일을 가진 중복 user 도큐먼트 그룹 찾기 */
+  const duplicateGroups = (() => {
+    const map = new Map<string, UserDoc[]>()
+    for (const u of users) {
+      const k = (u.이메일 || '').toLowerCase().trim()
+      if (!k) continue
+      if (!map.has(k)) map.set(k, [])
+      map.get(k)!.push(u)
+    }
+    return [...map.entries()].filter(([, arr]) => arr.length > 1)
+  })()
+
+  /** 중복 user 두 개 중 하나(secondary)의 신청 데이터를 primary 로 이관하고 secondary 삭제 */
+  const mergeDuplicates = async (primaryId: string, secondaryId: string) => {
+    if (primaryId === secondaryId) return
+    if (!confirm(`이 작업은 되돌릴 수 없습니다.\n\n• ${secondaryId} 의 모든 신청 데이터를 ${primaryId} 로 이관\n• ${secondaryId} 사용자 문서 삭제\n\n계속할까요?`)) return
+    try {
+      // 신청 데이터 이관
+      const appsSnap = await getDocs(query(collection(db, 'applications'), where('user_id', '==', secondaryId)))
+      const batch = writeBatch(db)
+      appsSnap.docs.forEach(d => batch.update(d.ref, { user_id: primaryId }))
+      await batch.commit()
+      // 사용자 문서 삭제
+      await deleteDoc(doc(db, 'users', secondaryId))
+      setUsers(prev => prev.filter(u => u.id !== secondaryId))
+      showMsg(`병합 완료 — 신청 ${appsSnap.size}건 이관 + 중복 사용자 삭제`)
+    } catch (e) {
+      console.error(e)
+      showMsg('병합 실패: ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
 
   const getToken = async () => {
     if (!user) throw new Error('로그인이 필요합니다.')
@@ -196,6 +228,46 @@ export default function EmployeesPage() {
             <p style={{ fontSize: 14, color: '#6b7280' }}>사내근로복지기금 시스템 이용자를 관리합니다.</p>
           </div>
         </div>
+
+        {/* 중복 사용자 경고 */}
+        {duplicateGroups.length > 0 && (
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, padding: '16px 20px', marginBottom: 18 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <span style={{ fontSize: 18 }}>⚠️</span>
+              <strong style={{ fontSize: 14, color: '#92400e' }}>중복 사용자 발견 — {duplicateGroups.length}건</strong>
+              <span style={{ fontSize: 12, color: '#92400e', opacity: 0.8 }}>같은 이메일로 두 개 이상의 계정이 등록되어 있습니다.</span>
+            </div>
+            {duplicateGroups.map(([email, dupUsers]) => (
+              <div key={email} style={{ background: '#fff', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', marginBottom: 8 }}>
+                <div style={{ fontSize: 13, color: '#92400e', fontWeight: 600, marginBottom: 6 }}>📧 {email}</div>
+                {dupUsers.map(u => {
+                  const others = dupUsers.filter(x => x.id !== u.id)
+                  return (
+                    <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', fontSize: 12, color: '#374151', flexWrap: 'wrap' }}>
+                      <code style={{ background: '#f3f4f6', padding: '2px 8px', borderRadius: 4, fontSize: 11 }}>{u.id.slice(0, 16)}…</code>
+                      <span>{u.성명 || '(이름없음)'} · {u.부서 || '-'} · {u.직급 || '-'}</span>
+                      <span style={{ color: '#9ca3af' }}>사번: {u.사번 || '-'}</span>
+                      <div style={{ flex: 1 }} />
+                      {others.map(o => (
+                        <button
+                          key={o.id}
+                          onClick={() => mergeDuplicates(u.id, o.id)}
+                          style={{ background: '#1a56db', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+                        >
+                          ← {o.id.slice(0, 8)}… 의 신청을 이쪽으로 병합
+                        </button>
+                      ))}
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+            <div style={{ fontSize: 11, color: '#92400e', marginTop: 6, opacity: 0.8 }}>
+              💡 보존할 계정 행에서 병합 버튼을 누르면, 다른 계정의 신청 데이터를 그쪽으로 이관 후 중복 계정을 삭제합니다.
+              Auth 계정 정리는 Firebase Console 에서 수동으로 진행하세요.
+            </div>
+          </div>
+        )}
 
         {/* Stats cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 14, marginBottom: 24 }}>

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createUserWithEmailAndPassword } from 'firebase/auth'
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase'
 
 export default function SignupPage() {
@@ -38,6 +38,16 @@ export default function SignupPage() {
     setLoading(true)
     setError('')
     try {
+      // 같은 이메일로 이미 가입된 사용자(특히 Google 가입자)가 있는지 사전 확인
+      try {
+        const q = query(collection(db, 'users'), where('이메일', '==', form.email))
+        const snap = await getDocs(q)
+        if (!snap.empty) {
+          setError('이미 같은 이메일로 가입된 계정이 있습니다. Google 로그인 또는 비밀번호 찾기를 이용해주세요.')
+          setLoading(false)
+          return
+        }
+      } catch { /* 조회 실패 시 진행 */ }
       const cred = await createUserWithEmailAndPassword(auth, form.email, form.password)
       await setDoc(doc(db, 'users', cred.user.uid), {
         사번: form.employeeId,

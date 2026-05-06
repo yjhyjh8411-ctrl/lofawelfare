@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, sendPasswordResetEmail } from 'firebase/auth'
-import { doc, getDoc } from 'firebase/firestore'
+import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, sendPasswordResetEmail, signOut, deleteUser } from 'firebase/auth'
+import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase'
 
 export default function LoginPage() {
@@ -88,8 +88,31 @@ export default function LoginPage() {
     try {
       const result = await signInWithPopup(auth, new GoogleAuthProvider())
       const userDoc = await getDoc(doc(db, 'users', result.user.uid))
-      const dest = !userDoc.exists() ? '/complete-profile' : (userDoc.data()?.role === 'admin' || userDoc.data()?.isAdmin) ? '/admin' : '/main'
-      router.push(dest)
+      if (userDoc.exists()) {
+        // 기존 사용자 → 정상 진입
+        const dest = (userDoc.data()?.role === 'admin' || userDoc.data()?.isAdmin) ? '/admin' : '/main'
+        router.push(dest)
+        return
+      }
+      // 신규 Google 사용자 — 같은 이메일로 이미 가입된 사용자가 있는지 확인
+      const googleEmail = result.user.email || ''
+      let dupDocId = ''
+      if (googleEmail) {
+        try {
+          const q = query(collection(db, 'users'), where('이메일', '==', googleEmail))
+          const dupSnap = await getDocs(q)
+          dupDocId = dupSnap.docs.find(d => d.id !== result.user.uid)?.id || ''
+        } catch { /* 조회 실패 시 진행 */ }
+      }
+      if (dupDocId) {
+        // 중복 — 새로 만들어진 Google 인증 사용자를 정리하고 안내
+        try { await deleteUser(result.user) } catch { /* 삭제 실패해도 sign out */ }
+        try { await signOut(auth) } catch { /* */ }
+        setError(`이미 ${googleEmail} 으로 가입된 계정이 있습니다.\n기존 이메일·비밀번호로 먼저 로그인 후, [내 정보 설정] → [로그인 방법]에서 Google 계정을 연동해주세요.`)
+        return
+      }
+      // 진짜 신규 가입자 → 추가 정보 입력
+      router.push('/complete-profile')
     } catch (err: unknown) {
       const code = err && typeof err === 'object' && 'code' in err ? (err as { code: string }).code : ''
       const msg = err && typeof err === 'object' && 'message' in err ? (err as { message: string }).message : String(err)
@@ -149,7 +172,7 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', color: '#dc2626', fontSize: 13, marginBottom: 16 }}>
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', color: '#dc2626', fontSize: 13, marginBottom: 16, whiteSpace: 'pre-line', lineHeight: 1.5 }}>
               {error}
             </div>
           )}
