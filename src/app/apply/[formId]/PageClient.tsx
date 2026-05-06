@@ -6,6 +6,7 @@ import { doc, getDoc, addDoc, updateDoc, collection, serverTimestamp } from 'fir
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '@/lib/firebase'
 import { useAuth } from '@/lib/auth-context'
+import { formatMoney, normalizeMoney } from '@/lib/money'
 
 type FieldType = 'text' | 'number' | 'amount' | 'date' | 'select' | 'textarea' | 'file'
   | 'account' | 'radio' | 'medical_records' | 'scholarship_records' | 'children_records' | 'loan_agreement' | 'housing_agreement'
@@ -389,7 +390,7 @@ export default function ApplyPage() {
                   <input type="text" value={row.대상자 || ''} placeholder="성명" onChange={e => updateRow(field.id, i, '대상자', e.target.value)} style={cellInput} />
                   <input type="text" value={row.기관} placeholder="기관명" onChange={e => updateRow(field.id, i, '기관', e.target.value)} style={cellInput} />
                   <input type="date" value={row.일자} onChange={e => updateRow(field.id, i, '일자', e.target.value)} style={cellInput} />
-                  <input type="number" value={row.금액} placeholder="0" min="0" onChange={e => updateRow(field.id, i, '금액', e.target.value)} style={{ ...cellInput, textAlign: 'right' }} />
+                  <input type="text" inputMode="numeric" value={formatMoney(row.금액)} placeholder="0" onChange={e => updateRow(field.id, i, '금액', normalizeMoney(e.target.value))} style={{ ...cellInput, textAlign: 'right' }} />
                   <button type="button" onClick={() => removeRow(field.id, i)} disabled={rows.length <= 1} style={delRowBtn(rows.length > 1)}>×</button>
                 </div>
               ))}
@@ -424,7 +425,7 @@ export default function ApplyPage() {
                     <option value="자녀">자녀</option><option value="본인">본인</option>
                   </select>
                   <input type="text" value={row.학교급학년} placeholder="예: 초1" onChange={e => updateRow(field.id, i, '학교급학년', e.target.value)} style={cellInput} />
-                  <input type="number" value={row.금액} placeholder="0" min="0" onChange={e => updateRow(field.id, i, '금액', e.target.value)} style={{ ...cellInput, textAlign: 'right' }} />
+                  <input type="text" inputMode="numeric" value={formatMoney(row.금액)} placeholder="0" onChange={e => updateRow(field.id, i, '금액', normalizeMoney(e.target.value))} style={{ ...cellInput, textAlign: 'right' }} />
                   <button type="button" onClick={() => removeRow(field.id, i)} disabled={rows.length <= 1} style={delRowBtn(rows.length > 1)}>×</button>
                 </div>
               ))}
@@ -481,7 +482,7 @@ export default function ApplyPage() {
                   <input type="text" value={row.대상자 || ''} placeholder="성명" onChange={e => updateRow(field.id, i, '대상자', e.target.value)} style={cellInput} />
                   <input type="text" value={row.사용처} placeholder="사용처" onChange={e => updateRow(field.id, i, '사용처', e.target.value)} style={cellInput} />
                   <input type="date" value={row.사용일자} onChange={e => updateRow(field.id, i, '사용일자', e.target.value)} style={cellInput} />
-                  <input type="number" value={row.금액} placeholder="0" min="0" onChange={e => updateRow(field.id, i, '금액', e.target.value)} style={{ ...cellInput, textAlign: 'right' }} />
+                  <input type="text" inputMode="numeric" value={formatMoney(row.금액)} placeholder="0" onChange={e => updateRow(field.id, i, '금액', normalizeMoney(e.target.value))} style={{ ...cellInput, textAlign: 'right' }} />
                   <button type="button" onClick={() => removeRow(field.id, i)} disabled={rows.length <= 1} style={delRowBtn(rows.length > 1)}>×</button>
                 </div>
               ))}
@@ -514,7 +515,7 @@ export default function ApplyPage() {
                   <input type="text" value={row.대상자 || ''} placeholder="성명" onChange={e => updateRow(field.id, i, '대상자', e.target.value)} style={cellInput} />
                   <input type="text" value={row.활동내용} placeholder="활동내용" onChange={e => updateRow(field.id, i, '활동내용', e.target.value)} style={cellInput} />
                   <input type="date" value={row.사용일자} onChange={e => updateRow(field.id, i, '사용일자', e.target.value)} style={cellInput} />
-                  <input type="number" value={row.금액} placeholder="0" min="0" onChange={e => updateRow(field.id, i, '금액', e.target.value)} style={{ ...cellInput, textAlign: 'right' }} />
+                  <input type="text" inputMode="numeric" value={formatMoney(row.금액)} placeholder="0" onChange={e => updateRow(field.id, i, '금액', normalizeMoney(e.target.value))} style={{ ...cellInput, textAlign: 'right' }} />
                   <button type="button" onClick={() => removeRow(field.id, i)} disabled={rows.length <= 1} style={delRowBtn(rows.length > 1)}>×</button>
                 </div>
               ))}
@@ -547,7 +548,7 @@ export default function ApplyPage() {
                   <input type="text" value={row.대상자} placeholder="성명" onChange={e => updateRow(field.id, i, '대상자', e.target.value)} style={cellInput} />
                   <input type="text" value={row.접종항목} placeholder="예: 독감 예방접종" onChange={e => updateRow(field.id, i, '접종항목', e.target.value)} style={cellInput} />
                   <input type="date" value={row.접종일} onChange={e => updateRow(field.id, i, '접종일', e.target.value)} style={cellInput} />
-                  <input type="number" value={row.금액} placeholder="0" min="0" onChange={e => updateRow(field.id, i, '금액', e.target.value)} style={{ ...cellInput, textAlign: 'right' }} />
+                  <input type="text" inputMode="numeric" value={formatMoney(row.금액)} placeholder="0" onChange={e => updateRow(field.id, i, '금액', normalizeMoney(e.target.value))} style={{ ...cellInput, textAlign: 'right' }} />
                   <button type="button" onClick={() => removeRow(field.id, i)} disabled={rows.length <= 1} style={delRowBtn(rows.length > 1)}>×</button>
                 </div>
               ))}
@@ -587,11 +588,14 @@ export default function ApplyPage() {
       case 'amount':
         return (
           <div key={field.id} style={{ marginBottom: 20 }}>
-            <label style={fldLabel}>{field.label} {field.required && <span style={req}>*</span>}</label>
+            <label style={fldLabel}>
+              {field.label} {field.required && <span style={req}>*</span>}
+              <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 400, marginLeft: 6 }}>(단위: 원)</span>
+            </label>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 14, color: '#6b7280' }}>₩</span>
-              <input type="number" min="0" value={values[field.id] || ''} placeholder="0"
-                onChange={e => set(field.id, e.target.value)}
+              <input type="text" inputMode="numeric" value={formatMoney(values[field.id] || '')} placeholder="0"
+                onChange={e => set(field.id, normalizeMoney(e.target.value))}
                 style={{ flex: 1, border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 12px', fontSize: 14, outline: 'none', textAlign: 'right' }} />
               <span style={{ fontSize: 14, color: '#6b7280' }}>원</span>
             </div>
@@ -680,7 +684,26 @@ export default function ApplyPage() {
       case 'housing_agreement':
         return null
 
-      default:
+      default: {
+        // 금액성 필드는 number 타입이거나, 라벨에 '금액'/'amount' 포함된 경우 천원단위 콤마 + 원 단위
+        const isMoney = field.type === 'number' && /금액|amount/i.test(field.label)
+        if (isMoney) {
+          return (
+            <div key={field.id} style={{ marginBottom: 20 }}>
+              <label style={fldLabel}>
+                {field.label} {field.required && <span style={req}>*</span>}
+                <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 400, marginLeft: 6 }}>(단위: 원)</span>
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 14, color: '#6b7280' }}>₩</span>
+                <input type="text" inputMode="numeric" value={formatMoney(values[field.id] || '')} placeholder="0"
+                  onChange={e => set(field.id, normalizeMoney(e.target.value))}
+                  style={{ flex: 1, border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 12px', fontSize: 14, outline: 'none', textAlign: 'right' }} />
+                <span style={{ fontSize: 14, color: '#6b7280' }}>원</span>
+              </div>
+            </div>
+          )
+        }
         return (
           <div key={field.id} style={{ marginBottom: 20 }}>
             <label style={fldLabel}>{field.label} {field.required && <span style={req}>*</span>}</label>
@@ -690,6 +713,7 @@ export default function ApplyPage() {
               style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 12px', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
           </div>
         )
+      }
     }
   }
 
