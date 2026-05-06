@@ -28,10 +28,14 @@ export default function CompleteProfilePage() {
       if (!user) { router.push('/login'); return }
       setUid(user.uid)
       setGoogleEmail(user.email || '')
+      // sessionStorage 에 저장된 사번 (login Google 모달에서 입력된 값) prefill
+      let prefillEmp = ''
+      try { prefillEmp = sessionStorage.getItem('signup_emp_id') || '' } catch { /* */ }
       setForm(prev => ({
         ...prev,
         name: user.displayName || '',
         email: user.email || '',
+        employeeId: prefillEmp || prev.employeeId,
       }))
     })
     return () => unsubscribe()
@@ -89,6 +93,7 @@ export default function CompleteProfilePage() {
         status: 'active',
         createdAt: serverTimestamp(),
       })
+      try { sessionStorage.removeItem('signup_emp_id') } catch { /* */ }
       router.push('/main')
     } catch {
       setError('프로필 저장 중 오류가 발생했습니다.')

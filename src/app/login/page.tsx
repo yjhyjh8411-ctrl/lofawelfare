@@ -17,6 +17,10 @@ export default function LoginPage() {
   const [resetEmail, setResetEmail] = useState('')
   const [resetSending, setResetSending] = useState(false)
   const [resetMsg, setResetMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  // Google 로그인 사번 확인 모달
+  const [googleModalOpen, setGoogleModalOpen] = useState(false)
+  const [googleEmpId, setGoogleEmpId] = useState('')
+  const [googleModalErr, setGoogleModalErr] = useState('')
   const router = useRouter()
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -83,55 +87,77 @@ export default function LoginPage() {
     }
   }
 
+  /** Google 버튼 클릭 → 사번 입력 모달 오픈 */
+  const handleGoogleClick = () => {
+    setGoogleEmpId('')
+    setGoogleModalErr('')
+    setGoogleModalOpen(true)
+  }
+
+  /** 사번 입력 후 Google 인증 진행 — 사번 기반 중복 검사 우선 */
   const handleGoogleLogin = async () => {
-    setGoogleLoading(true); setError('')
+    const empId = googleEmpId.trim()
+    if (!empId) {
+      setGoogleModalErr('사번을 입력해주세요.')
+      return
+    }
+    setGoogleLoading(true)
+    setGoogleModalErr('')
+    setError('')
     try {
+      // 사번 중복 검사 — 모든 user 도큐먼트 fetch (admin auth 없이도 firestore rules: isAuth 필요한데, 미인증 상태에서 query 불가 → Auth 후 검사로 옮김)
+      // 그래서 1단계 로컬 검사는 미수행, 인증 후 통합 검사
       const result = await signInWithPopup(auth, new GoogleAuthProvider())
-      const userDoc = await getDoc(doc(db, 'users', result.user.uid))
-      if (userDoc.exists()) {
-        // 기존 사용자 → 정상 진입
-        const dest = (userDoc.data()?.role === 'admin' || userDoc.data()?.isAdmin) ? '/admin' : '/main'
-        router.push(dest)
-        return
-      }
-      // 신규 Google 사용자 — 같은 이메일로 이미 가입된 사용자가 있는지 확인
+      // 인증된 상태에서 모든 user 검색
+      const allSnap = await getDocs(collection(db, 'users'))
       const googleEmail = (result.user.email || '').trim().toLowerCase()
-      let dupDocId = ''
-      if (googleEmail) {
-        try {
-          // 1차: case-sensitive exact match (대부분의 경우)
-          const q1 = query(collection(db, 'users'), where('이메일', '==', googleEmail))
-          const s1 = await getDocs(q1)
-          dupDocId = s1.docs.find(d => d.id !== result.user.uid)?.id || ''
-          // 2차: 원본 이메일(케이스 살림) 로도 검색
-          if (!dupDocId && googleEmail !== (result.user.email || '')) {
-            const q2 = query(collection(db, 'users'), where('이메일', '==', result.user.email))
-            const s2 = await getDocs(q2)
-            dupDocId = s2.docs.find(d => d.id !== result.user.uid)?.id || ''
-          }
-          // 3차 fallback: 전체 users client-side 비교 (대소문자 무시)
-          if (!dupDocId) {
-            const allSnap = await getDocs(collection(db, 'users'))
-            dupDocId = allSnap.docs.find(d => d.id !== result.user.uid && (d.data().이메일 || '').toLowerCase().trim() === googleEmail)?.id || ''
-          }
-        } catch (err) {
-          console.error('[duplicate-check] failed:', err)
+
+      // 기존 사용자(uid 일치) — 사번도 일치해야 정상 로그인
+      const own = allSnap.docs.find(d => d.id === result.user.uid)
+      if (own) {
+        const ownEmp = (own.data().사번 || '').trim()
+        if (ownEmp && ownEmp !== empId) {
+          try { await signOut(auth) } catch { /* */ }
+          setGoogleLoading(false)
+          setGoogleModalErr(`입력한 사번(${empId})이 등록된 사번(${ownEmp})과 다릅니다.`)
+          return
         }
-      }
-      if (dupDocId) {
-        // 중복 — 새로 만들어진 Google 인증 사용자를 정리하고 안내
-        try { await deleteUser(result.user) } catch { /* 삭제 실패해도 sign out */ }
-        try { await signOut(auth) } catch { /* */ }
-        setError(`이미 ${googleEmail} 으로 가입된 계정이 있습니다.\n기존 이메일·비밀번호로 먼저 로그인 후, [내 정보 설정] → [로그인 방법]에서 Google 계정을 연동해주세요.`)
+        // 정상 로그인
+        setGoogleModalOpen(false)
+        const ud = own.data()
+        router.push((ud.role === 'admin' || ud.isAdmin) ? '/admin' : '/main')
         return
       }
-      // 진짜 신규 가입자 → 추가 정보 입력
+
+      // 신규 Google 사용자 — 다른 사용자가 같은 사번 또는 이메일을 쓰고 있는지 검사
+      const dupByEmp = allSnap.docs.find(d => (d.data().사번 || '').trim() === empId)
+      const dupByEmail = googleEmail
+        ? allSnap.docs.find(d => (d.data().이메일 || '').toLowerCase().trim() === googleEmail)
+        : null
+
+      if (dupByEmp || dupByEmail) {
+        // 중복 — 방금 만든 Google Auth 계정 정리 후 안내
+        try { await deleteUser(result.user) } catch { /* 실패해도 sign out */ }
+        try { await signOut(auth) } catch { /* */ }
+        setGoogleModalOpen(false)
+        const reason = dupByEmp
+          ? `사번 ${empId} 으로 이미 가입된 계정이 있습니다.`
+          : `이미 ${googleEmail} 으로 가입된 계정이 있습니다.`
+        setError(`${reason}\n기존 이메일·비밀번호로 먼저 로그인 후, [내 정보 설정] → [로그인 방법]에서 Google 계정 연동을 사용해주세요.`)
+        return
+      }
+
+      // 사번/이메일 모두 깨끗 → 신규 가입 진행 (사번을 sessionStorage 로 전달)
+      try { sessionStorage.setItem('signup_emp_id', empId) } catch { /* */ }
+      setGoogleModalOpen(false)
       router.push('/complete-profile')
     } catch (err: unknown) {
       const code = err && typeof err === 'object' && 'code' in err ? (err as { code: string }).code : ''
       const msg = err && typeof err === 'object' && 'message' in err ? (err as { message: string }).message : String(err)
-      if (code !== 'auth/popup-closed-by-user') {
-        setError(`Google 로그인 오류: ${code || msg}`)
+      if (code === 'auth/popup-closed-by-user') {
+        // 사용자 취소 — 모달은 그대로 두기
+      } else {
+        setGoogleModalErr(`Google 로그인 오류: ${code || msg}`)
       }
     } finally { setGoogleLoading(false) }
   }
@@ -222,7 +248,7 @@ export default function LoginPage() {
         </div>
 
         <button
-          onClick={handleGoogleLogin} disabled={googleLoading}
+          onClick={handleGoogleClick} disabled={googleLoading}
           style={{
             width: '100%', background: '#fff', color: '#374151',
             border: '1.5px solid #e5e7eb', borderRadius: 10,
@@ -248,6 +274,74 @@ export default function LoginPage() {
           </button>
         </div>
       </div>
+
+      {/* Google 로그인 사번 확인 모달 */}
+      {googleModalOpen && (
+        <div
+          onClick={() => !googleLoading && setGoogleModalOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: 14, padding: '28px 30px', width: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <h3 style={{ fontSize: 17, fontWeight: 800, color: '#111827' }}>🆔 사번 확인</h3>
+              {!googleLoading && (
+                <button onClick={() => setGoogleModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 20, color: '#6b7280', cursor: 'pointer' }}>✕</button>
+              )}
+            </div>
+            <p style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.6, marginBottom: 16 }}>
+              Google 계정으로 로그인하시기 전에 사번을 확인합니다.<br />
+              ⚠ 이미 같은 사번으로 가입된 경우 중복 가입을 방지합니다.
+            </p>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>사번</label>
+            <input
+              type="text"
+              value={googleEmpId}
+              onChange={e => setGoogleEmpId(e.target.value)}
+              placeholder="예: 2121"
+              autoFocus
+              disabled={googleLoading}
+              onKeyDown={e => { if (e.key === 'Enter' && !googleLoading) handleGoogleLogin() }}
+              style={{ ...inputStyle, marginBottom: 14 }}
+            />
+            {googleModalErr && (
+              <div style={{
+                background: '#fef2f2', border: '1px solid #fecaca',
+                color: '#dc2626', fontSize: 12.5, lineHeight: 1.5,
+                padding: '10px 12px', borderRadius: 8, marginBottom: 14, whiteSpace: 'pre-line',
+              }}>
+                {googleModalErr}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              {!googleLoading && (
+                <button
+                  onClick={() => setGoogleModalOpen(false)}
+                  style={{ background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                >취소</button>
+              )}
+              <button
+                onClick={handleGoogleLogin}
+                disabled={googleLoading}
+                style={{
+                  background: googleLoading ? '#9ca3af' : '#1a56db',
+                  color: '#fff', border: 'none', borderRadius: 8,
+                  padding: '9px 22px', fontSize: 13, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  cursor: googleLoading ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {googleLoading ? '확인 중...' : '확인 후 Google 인증'}
+              </button>
+            </div>
+            <div style={{ marginTop: 16, padding: '10px 12px', background: '#f9fafb', borderRadius: 8, fontSize: 11, color: '#6b7280', lineHeight: 1.6 }}>
+              💡 기존 사용자도 본인 사번을 입력해주세요. 사번이 등록된 정보와 다르면 로그인이 차단됩니다.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 비밀번호 찾기 모달 */}
       {resetOpen && (
