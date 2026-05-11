@@ -6,6 +6,7 @@ import { collection, getDocs, query, where, getDoc, doc } from 'firebase/firesto
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/lib/auth-context'
 import Navbar from '@/components/Navbar'
+import QRCorner from '@/components/QRCorner'
 
 interface FormConfig {
   id: string
@@ -211,6 +212,7 @@ export default function ApplyPage() {
           </div>
         )}
       </div>
+      <QRCorner url="/apply" caption="복지 신청 페이지" />
     </div>
   )
 }

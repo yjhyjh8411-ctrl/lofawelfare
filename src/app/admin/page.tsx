@@ -10,6 +10,7 @@ import { getIdToken } from 'firebase/auth'
 import { auth as firebaseAuth, db, storage } from '@/lib/firebase'
 import { useAuth } from '@/lib/auth-context'
 import Navbar from '@/components/Navbar'
+import QRCorner from '@/components/QRCorner'
 import StatsCards from './components/StatsCards'
 import PendingList from './components/PendingList'
 import CrossTable from './components/CrossTable'
@@ -626,6 +627,7 @@ function AdminPageInner() {
           )}
         </ModalOverlay>
       )}
+      <QRCorner url="/admin" caption="관리자 페이지" />
     </div>
   )
 }

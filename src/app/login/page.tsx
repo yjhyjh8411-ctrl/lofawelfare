@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, sendPasswordResetEmail, signOut, deleteUser } from 'firebase/auth'
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase'
+import QRCorner from '@/components/QRCorner'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -409,6 +410,7 @@ export default function LoginPage() {
           </div>
         </div>
       )}
+      <QRCorner url="/login" caption="로그인 페이지" />
     </div>
   )
 }
