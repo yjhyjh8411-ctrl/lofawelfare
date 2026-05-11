@@ -310,26 +310,48 @@ function AdminPageInner() {
   }
 
   const handleExportCSV = () => {
+    // '신청금액' 카테고리: 의료비/문화/생활/예방접종 총액을 묶어 반려사유 바로 뒤에 고정 배치
+    const AMOUNT_KEYS: { key: string; label: string }[] = [
+      { key: '총금액', label: '[신청금액] 총금액(의료비지원)' },
+      { key: '문화활동총액', label: '[신청금액] 문화활동총액' },
+      { key: '생활복지총액', label: '[신청금액] 생활복지총액' },
+      { key: '예방접종총액', label: '[신청금액] 예방접종총액' },
+    ]
+    const amountKeySet = new Set(AMOUNT_KEYS.map(a => a.key))
     const dataKeys = new Set<string>()
     apps.forEach(a => { if (a.data) Object.keys(a.data).forEach(k => dataKeys.add(k)) })
-    const extraCols = Array.from(dataKeys)
-    const header = ['사번', '성명', '부서', '직급', '신청항목', '신청일', '상태', '반려사유', ...extraCols]
+    const extraCols = Array.from(dataKeys).filter(k => !amountKeySet.has(k))
+    const header = [
+      '사번', '성명', '부서', '직급', '신청항목', '신청일', '상태', '반려사유',
+      ...AMOUNT_KEYS.map(a => a.label),
+      ...extraCols,
+    ]
+    const fmtValue = (v: unknown): string => {
+      if (v === null || v === undefined) return ''
+      if (Array.isArray(v)) {
+        // 다중 첨부파일 등 {url,name} 배열은 파일명을 ; 로 연결
+        const named = v.map(item => {
+          const o = item as Record<string, unknown>
+          if (o && typeof o === 'object' && typeof o.name === 'string') return String(o.name)
+          return JSON.stringify(item)
+        })
+        return named.join('; ')
+      }
+      if (typeof v === 'object') {
+        const obj = v as Record<string, unknown>
+        if (obj.name) return String(obj.name)
+        return JSON.stringify(v)
+      }
+      return String(v)
+    }
     const rows: string[][] = [header]
     apps.forEach(a => {
       const d = a.created_at?.toDate?.()
       const s = a.status === 'approved' ? '승인' : a.status === 'rejected' ? '반려' : '검토중'
       const base = [a.applicant?.사번||'', a.applicant?.성명||'', a.applicant?.부서||'', a.applicant?.직급||'', a.formTitle||'', d?d.toLocaleDateString('ko-KR'):'', s, a.reject_reason||'']
-      const extra = extraCols.map(k => {
-        const v = a.data?.[k]
-        if (v === null || v === undefined) return ''
-        if (typeof v === 'object' && !Array.isArray(v)) {
-          const obj = v as Record<string, unknown>
-          if (obj.name) return String(obj.name)
-          return JSON.stringify(v)
-        }
-        return String(v)
-      })
-      rows.push([...base, ...extra])
+      const amounts = AMOUNT_KEYS.map(({ key }) => fmtValue(a.data?.[key]))
+      const extra = extraCols.map(k => fmtValue(a.data?.[k]))
+      rows.push([...base, ...amounts, ...extra])
     })
     const csv = '\uFEFF' + rows.map(r => r.map(c => `"${c.replace(/"/g,'""')}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })

@@ -112,8 +112,11 @@ export default function ApplyPage() {
 
   const [formConfig, setFormConfig] = useState<FormConfig | null>(null)
   const [values, setValues] = useState<Record<string, string>>({})
-  const [fileValues, setFileValues] = useState<Record<string, File>>({})
-  const [existingFiles, setExistingFiles] = useState<Record<string, { url: string; name: string }>>({})
+  const [fileValues, setFileValues] = useState<Record<string, File[]>>({})
+  const [existingFiles, setExistingFiles] = useState<Record<string, { url: string; name: string; size?: number }[]>>({})
+
+  // 첨부파일 총 용량 제한 (보험료 신청 등 다중 첨부 시)
+  const MAX_TOTAL_BYTES = 32 * 1024 * 1024 // 32MB
   const [dynRows, setDynRows] = useState<Record<string, Record<string, string>[]>>({})
   const [privacyConsent, setPrivacyConsent] = useState(false)
   const [loanConsent, setLoanConsent] = useState(false)
@@ -153,7 +156,7 @@ export default function ApplyPage() {
         if (appSnap.exists()) {
           const appData = appSnap.data().data as Record<string, unknown>
           const initVals: Record<string, string> = {}
-          const initFiles: Record<string, { url: string; name: string }> = {}
+          const initFiles: Record<string, { url: string; name: string; size?: number }[]> = {}
           for (const f of cfg.fields) {
             const val = appData[f.label]
             if (f.type === 'account' && typeof val === 'string') {
@@ -163,8 +166,18 @@ export default function ApplyPage() {
                 initVals[f.id + '_number'] = m[2]
                 initVals[f.id + '_holder'] = m[3]
               }
-            } else if (f.type === 'file' && val && typeof val === 'object') {
-              initFiles[f.id] = val as { url: string; name: string }
+            } else if (f.type === 'file' && val) {
+              // 신규: 배열 / 기존: 단일 객체 둘 다 호환
+              if (Array.isArray(val)) {
+                initFiles[f.id] = (val as Record<string, unknown>[])
+                  .filter(o => o && typeof o.url === 'string' && typeof o.name === 'string')
+                  .map(o => ({ url: String(o.url), name: String(o.name), size: typeof o.size === 'number' ? o.size : undefined }))
+              } else if (typeof val === 'object') {
+                const o = val as Record<string, unknown>
+                if (typeof o.url === 'string' && typeof o.name === 'string') {
+                  initFiles[f.id] = [{ url: String(o.url), name: String(o.name), size: typeof o.size === 'number' ? o.size : undefined }]
+                }
+              }
             } else if (DYNAMIC_TYPES.includes(f.type)) {
               if (Array.isArray(val) && val.length > 0) initDyn[f.id] = val as Record<string, string>[]
             } else if (typeof val === 'string') {
@@ -244,7 +257,7 @@ export default function ApplyPage() {
 
     for (const f of formConfig.fields) {
       if (!f.required) continue
-      if (f.type === 'file' && !fileValues[f.id] && !existingFiles[f.id]) { showError(`'${f.label}' 파일을 첨부해주세요.`); return }
+      if (f.type === 'file' && !(fileValues[f.id]?.length) && !(existingFiles[f.id]?.length)) { showError(`'${f.label}' 파일을 첨부해주세요.`); return }
       if (f.type === 'account' && (!values[f.id + '_bank'] || !values[f.id + '_number'] || !values[f.id + '_holder'])) {
         showError('지급 계좌번호를 모두 입력해주세요.'); return
       }
@@ -256,23 +269,43 @@ export default function ApplyPage() {
       }
     }
 
+    // 첨부파일 총 용량 검증 (필드별 합계가 32MB 이내)
+    for (const f of formConfig.fields) {
+      if (f.type !== 'file') continue
+      const pending = fileValues[f.id] || []
+      const existing = existingFiles[f.id] || []
+      const total = pending.reduce((s, file) => s + file.size, 0)
+        + existing.reduce((s, ef) => s + (ef.size || 0), 0)
+      if (total > MAX_TOTAL_BYTES) {
+        showError(`'${f.label}' 첨부파일 합계가 ${(MAX_TOTAL_BYTES / 1024 / 1024).toFixed(0)}MB 를 초과합니다. (현재 ${(total / 1024 / 1024).toFixed(1)}MB)`)
+        return
+      }
+    }
+
     setSubmitting(true); setError('')
     try {
       const appData: Record<string, unknown> = {}
       for (const f of formConfig.fields) {
         if (f.type === 'file') {
-          const file = fileValues[f.id]
-          if (file) {
+          // 기존(편집 시 유지된) 파일 + 새로 추가된 파일을 모두 배열로 저장
+          const uploaded: { url: string; name: string; size: number }[] = []
+          // 1) 기존 유지 파일
+          for (const ef of (existingFiles[f.id] || [])) {
+            uploaded.push({ url: ef.url, name: ef.name, size: ef.size ?? 0 })
+          }
+          // 2) 신규 업로드
+          const newFiles = fileValues[f.id] || []
+          for (let idx = 0; idx < newFiles.length; idx++) {
+            const file = newFiles[idx]
             const now = new Date()
             const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`
             const prefix = `${profile.employeeId}_${profile.name}_${profile.department}_${formConfig.제목}`
-            const storedName = `${prefix}_${ts}_${file.name}`
+            const storedName = `${prefix}_${ts}_${idx + 1}_${file.name}`
             const path = `applications/${user.uid}/${storedName}`
             await uploadBytes(ref(storage, path), file)
-            appData[f.label] = { url: await getDownloadURL(ref(storage, path)), name: storedName, size: file.size }
-          } else if (existingFiles[f.id]) {
-            appData[f.label] = existingFiles[f.id]
+            uploaded.push({ url: await getDownloadURL(ref(storage, path)), name: storedName, size: file.size })
           }
+          if (uploaded.length > 0) appData[f.label] = uploaded
         } else if (f.type === 'account') {
           appData[f.label] = `${values[f.id + '_bank']} ${values[f.id + '_number']} (${values[f.id + '_holder']})`
         } else if (DYNAMIC_TYPES.includes(f.type)) {
@@ -625,32 +658,59 @@ export default function ApplyPage() {
       case 'file':
         return (
           <div key={field.id} style={{ marginBottom: 20 }}>
-            <label style={fldLabel}>{field.label} {field.required && !existingFiles[field.id] && <span style={req}>*</span>}</label>
+            <label style={fldLabel}>{field.label} {field.required && !(existingFiles[field.id]?.length) && <span style={req}>*</span>}</label>
             {field.hint && (
               <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '8px 12px', fontSize: 12, color: '#1e40af', marginBottom: 10 }}>
                 ① {field.hint}
               </div>
             )}
-            {existingFiles[field.id] && !fileValues[field.id] && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, padding: '6px 10px', marginBottom: 8, fontSize: 12 }}>
-                <span style={{ color: '#059669' }}>📎 기존 파일:</span>
-                <a href={existingFiles[field.id].url} target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'none', fontWeight: 600 }}>
-                  {existingFiles[field.id].name}
+            {(existingFiles[field.id] || []).map((ef, i) => (
+              <div key={`ex-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, padding: '6px 10px', marginBottom: 6, fontSize: 12 }}>
+                <span style={{ color: '#059669' }}>📎 기존:</span>
+                <a href={ef.url} target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'none', fontWeight: 600, flex: 1, wordBreak: 'break-all' }}>
+                  {ef.name}
                 </a>
-                <span style={{ color: '#6b7280' }}>(새 파일 선택 시 교체됩니다)</span>
+                {ef.size != null && <span style={{ color: '#9ca3af', fontSize: 11 }}>({(ef.size / 1024).toFixed(0)} KB)</span>}
+                <button type="button" onClick={() => setExistingFiles(p => ({ ...p, [field.id]: (p[field.id] || []).filter((_, idx) => idx !== i) }))}
+                  style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, padding: '0 4px', flexShrink: 0 }}>✕</button>
               </div>
-            )}
+            ))}
+            {(fileValues[field.id] || []).map((file, i) => (
+              <div key={`new-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '6px 10px', marginBottom: 6, fontSize: 12 }}>
+                <span style={{ color: '#1d4ed8' }}>➕ 신규:</span>
+                <span style={{ color: '#1f2937', fontWeight: 600, flex: 1, wordBreak: 'break-all' }}>{file.name}</span>
+                <span style={{ color: '#9ca3af', fontSize: 11 }}>({(file.size / 1024).toFixed(0)} KB)</span>
+                <button type="button" onClick={() => setFileValues(p => ({ ...p, [field.id]: (p[field.id] || []).filter((_, idx) => idx !== i) }))}
+                  style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, padding: '0 4px', flexShrink: 0 }}>✕</button>
+              </div>
+            ))}
+            {(() => {
+              const totalBytes = (fileValues[field.id] || []).reduce((s, f) => s + f.size, 0)
+                + (existingFiles[field.id] || []).reduce((s, ef) => s + (ef.size || 0), 0)
+              const totalCount = (fileValues[field.id]?.length || 0) + (existingFiles[field.id]?.length || 0)
+              const over = totalBytes > MAX_TOTAL_BYTES
+              return totalCount > 0 ? (
+                <div style={{ fontSize: 11, color: over ? '#dc2626' : '#6b7280', marginBottom: 6 }}>
+                  합계 {totalCount}개 · {(totalBytes / 1024 / 1024).toFixed(2)} MB / 32 MB {over && '(초과)'}
+                </div>
+              ) : null
+            })()}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <label style={{ background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 14px', fontSize: 13, cursor: 'pointer', color: '#374151', flexShrink: 0 }}>
-                파일 선택
-                <input type="file" style={{ display: 'none' }} accept=".jpg,.jpeg,.png,.pdf,.doc,.docx"
-                  onChange={e => { const f = e.target.files?.[0]; if (f) setFileValues(p => ({ ...p, [field.id]: f })) }} />
+                파일 추가
+                <input type="file" multiple style={{ display: 'none' }} accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.heic,.heif"
+                  onChange={e => {
+                    const picked = Array.from(e.target.files || [])
+                    if (picked.length === 0) return
+                    setFileValues(p => ({ ...p, [field.id]: [...(p[field.id] || []), ...picked] }))
+                    e.target.value = ''
+                  }} />
               </label>
-              <span style={{ fontSize: 13, color: fileValues[field.id] ? '#059669' : '#9ca3af' }}>
-                {fileValues[field.id] ? fileValues[field.id].name : '선택된 파일 없음'}
+              <span style={{ fontSize: 12, color: '#6b7280' }}>
+                여러 장 한 번에 선택 가능 (휴대폰 사진 OK)
               </span>
             </div>
-            <div style={hint}>① JPG, PNG, PDF 등 파일 첨부 가능 · 최대 32MB</div>
+            <div style={hint}>① JPG, PNG, PDF 등 여러 장 첨부 가능 · 합계 최대 32MB</div>
           </div>
         )
 
