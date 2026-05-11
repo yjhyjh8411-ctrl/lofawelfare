@@ -311,22 +311,27 @@ function AdminPageInner() {
   }
 
   const handleExportCSV = () => {
-    // '신청금액' 카테고리: 의료비/문화/생활/예방접종 총액을 묶어 반려사유 바로 뒤에 고정 배치
-    const AMOUNT_KEYS: { key: string; label: string }[] = [
-      { key: '총금액', label: '[신청금액] 총금액(의료비지원)' },
-      { key: '문화활동총액', label: '[신청금액] 문화활동총액' },
-      { key: '생활복지총액', label: '[신청금액] 생활복지총액' },
-      { key: '예방접종총액', label: '[신청금액] 예방접종총액' },
-    ]
-    const amountKeySet = new Set(AMOUNT_KEYS.map(a => a.key))
+    // 4개 카테고리 총액(의료비/문화활동/돌봄(생활복지)/예방접종)을 단일 '신청금액' 컬럼 한 라인으로.
+    // 각 신청서는 보통 1개 카테고리만 채워지므로 합산해도 그 신청 1건의 금액이 됨.
+    const AMOUNT_KEYS = ['총금액', '문화활동총액', '생활복지총액', '예방접종총액']
+    const amountKeySet = new Set(AMOUNT_KEYS)
     const dataKeys = new Set<string>()
     apps.forEach(a => { if (a.data) Object.keys(a.data).forEach(k => dataKeys.add(k)) })
     const extraCols = Array.from(dataKeys).filter(k => !amountKeySet.has(k))
     const header = [
       '사번', '성명', '부서', '직급', '신청항목', '신청일', '상태', '반려사유',
-      ...AMOUNT_KEYS.map(a => a.label),
+      '신청금액',
       ...extraCols,
     ]
+    const toNum = (v: unknown): number => {
+      if (v === null || v === undefined) return 0
+      if (typeof v === 'number') return isFinite(v) ? v : 0
+      if (typeof v === 'string') {
+        const n = Number(v.replace(/,/g, ''))
+        return isFinite(n) ? n : 0
+      }
+      return 0
+    }
     const fmtValue = (v: unknown): string => {
       if (v === null || v === undefined) return ''
       if (Array.isArray(v)) {
@@ -350,9 +355,10 @@ function AdminPageInner() {
       const d = a.created_at?.toDate?.()
       const s = a.status === 'approved' ? '승인' : a.status === 'rejected' ? '반려' : '검토중'
       const base = [a.applicant?.사번||'', a.applicant?.성명||'', a.applicant?.부서||'', a.applicant?.직급||'', a.formTitle||'', d?d.toLocaleDateString('ko-KR'):'', s, a.reject_reason||'']
-      const amounts = AMOUNT_KEYS.map(({ key }) => fmtValue(a.data?.[key]))
+      const totalAmount = AMOUNT_KEYS.reduce((sum, key) => sum + toNum(a.data?.[key]), 0)
+      const totalCell = totalAmount > 0 ? String(totalAmount) : ''
       const extra = extraCols.map(k => fmtValue(a.data?.[k]))
-      rows.push([...base, ...amounts, ...extra])
+      rows.push([...base, totalCell, ...extra])
     })
     const csv = '\uFEFF' + rows.map(r => r.map(c => `"${c.replace(/"/g,'""')}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
