@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, useRef } from 'react'
+import { useRouter, usePathname } from 'next/navigation'
 import { User, onAuthStateChanged, signOut } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase'
@@ -18,6 +19,8 @@ export function resolveAccountStatus(data: Record<string, unknown> | undefined, 
 const PROFILE_CACHE_KEY = 'lofa_profile_cache'
 const PROFILE_CACHE_TTL = 5 * 60 * 1000 // 5분
 
+export type MfaMethod = 'sms' | 'email' | 'totp'
+
 interface UserProfile {
   uid: string
   employeeId: string
@@ -28,9 +31,33 @@ interface UserProfile {
   isAdmin: boolean
   status: string
   accountStatus: AccountStatus
+  mfaPreference: MfaMethod | null
   hireDate?: string
   phone?: string
 }
+
+/** MFA 세션 통과 여부 — sessionStorage 기반 (탭 닫히면 풀림) */
+export const MFA_SESSION_KEY = 'lofa_mfa_pass'
+export function isMfaPassedInSession(uid: string): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    const v = sessionStorage.getItem(MFA_SESSION_KEY)
+    if (!v) return false
+    const { uid: storedUid, ts } = JSON.parse(v)
+    if (storedUid !== uid) return false
+    // 12시간 한도
+    return Date.now() - ts < 12 * 60 * 60 * 1000
+  } catch { return false }
+}
+export function markMfaPassedInSession(uid: string) {
+  try { sessionStorage.setItem(MFA_SESSION_KEY, JSON.stringify({ uid, ts: Date.now() })) } catch { /* */ }
+}
+export function clearMfaSession() {
+  try { sessionStorage.removeItem(MFA_SESSION_KEY) } catch { /* */ }
+}
+
+/** MFA 가드 면제 경로 — 로그인 자체 흐름 페이지 */
+const MFA_EXEMPT_PATHS = ['/login', '/signup', '/complete-profile', '/mfa', '/mfa/setup', '/']
 
 interface AuthContextType {
   user: User | null
@@ -85,6 +112,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setLoading(false)
               return
             }
+            const mfaPrefRaw = data['mfaPreference']
+            const mfaPreference: MfaMethod | null = mfaPrefRaw === 'sms' || mfaPrefRaw === 'email' || mfaPrefRaw === 'totp' ? mfaPrefRaw : null
             const p: UserProfile = {
               uid: firebaseUser.uid,
               employeeId: data['사번'] || data['employeeId'] || '',
@@ -95,6 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               isAdmin,
               status: data['status'] || 'active',
               accountStatus,
+              mfaPreference,
               hireDate: data['입사일'] || data['hireDate'] || '',
               phone: data['전화번호'] || data['phone'] || '',
             }
@@ -109,6 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null)
         lastFetchedUid.current = null
         try { sessionStorage.removeItem(PROFILE_CACHE_KEY) } catch { /* */ }
+        clearMfaSession()
       }
       setLoading(false)
     })
@@ -130,6 +161,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           lastFetchedUid.current = null
           return
         }
+        const mfaPrefRaw = data['mfaPreference']
+        const mfaPreference: MfaMethod | null = mfaPrefRaw === 'sms' || mfaPrefRaw === 'email' || mfaPrefRaw === 'totp' ? mfaPrefRaw : null
         const p: UserProfile = {
           uid: user.uid,
           employeeId: data['사번'] || data['employeeId'] || '',
@@ -140,6 +173,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           isAdmin,
           status: data['status'] || 'active',
           accountStatus,
+          mfaPreference,
           hireDate: data['입사일'] || data['hireDate'] || '',
           phone: data['전화번호'] || data['phone'] || '',
         }
@@ -149,6 +183,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (e) { console.error('Failed to refresh profile:', e) }
   }
+
+  // ─── MFA Gate — 로그인+프로필 있는데 MFA 미통과면 강제 라우팅 ────────────────────
+  const router = useRouter()
+  const pathname = usePathname()
+  useEffect(() => {
+    if (loading) return
+    if (!user || !profile) return
+    if (typeof window === 'undefined') return
+    // 면제 경로
+    const exempt = MFA_EXEMPT_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'))
+    if (exempt) return
+    // 'admin' uid 는 면제 (긴급 백도어). 나머지는 모두 MFA 강제.
+    if (user.uid === 'admin') return
+    // 세션 통과면 OK
+    if (isMfaPassedInSession(user.uid)) return
+    // 미등록 → setup, 등록됨 → 입력
+    router.replace(profile.mfaPreference ? '/mfa' : '/mfa/setup')
+  }, [user, profile, loading, pathname, router])
 
   return (
     <AuthContext.Provider value={{ user, profile, loading, refreshProfile }}>

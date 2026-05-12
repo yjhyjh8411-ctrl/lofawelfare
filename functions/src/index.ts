@@ -1,7 +1,7 @@
 import { onRequest } from 'firebase-functions/v2/https'
 import * as admin from 'firebase-admin'
 import express from 'express'
-import { createHmac, randomBytes, createCipheriv, createDecipheriv } from 'crypto'
+import { createHmac, randomBytes, createCipheriv, createDecipheriv, createHash, timingSafeEqual } from 'crypto'
 import nodemailer from 'nodemailer'
 import { FieldValue } from 'firebase-admin/firestore'
 
@@ -435,6 +435,276 @@ app.delete('/api/solapi-oauth', async (req, res) => {
     await db.collection('settings').doc('notify').update({ 'sms.accessToken': FieldValue.delete(), 'sms.authType': FieldValue.delete(), 'sms.refreshToken': FieldValue.delete(), 'sms.tokenExpiry': FieldValue.delete() })
     res.json({ status: 'success' })
   } catch (e) { res.status(500).json({ status: 'error', message: String(e) }) }
+})
+
+// ─── MFA (2-Factor Authentication) ────────────────────────────────────────────
+// 1차 로그인 후 추가 인증. 3가지 지원: SMS OTP / 이메일 OTP / TOTP (RFC 6238)
+// 데이터:
+//   users/{uid}.mfaPreference: 'sms' | 'email' | 'totp' | null
+//   users/{uid}.totpSecret: enc:... (TOTP secret base32, 암호화 저장)
+//   users/{uid}.totpPendingSecret: 등록 중 임시 secret (확인 성공 시 totpSecret 으로 이동)
+//   users/{uid}.lastMfaAt: Timestamp
+//   mfa_codes/{uid}: { hash, channel, expiresAt, attempts, lastSentAt }
+// 보안 기준: OTP 5분 유효, 5회 시도 제한, 30초 재발송 throttle.
+
+const OTP_LENGTH = 6
+const OTP_TTL_MS = 5 * 60 * 1000
+const OTP_MAX_ATTEMPTS = 5
+const OTP_RESEND_THROTTLE_MS = 30 * 1000
+
+function generateOtp(): string {
+  // 6자리 랜덤 숫자 — 0xff 마스킹 후 modulo 사용 (편향 무시 — 분포는 충분)
+  let n = 0
+  while (n < 100000) n = randomBytes(4).readUInt32BE(0) % 1000000
+  return String(n).padStart(OTP_LENGTH, '0')
+}
+
+function hashOtp(uid: string, otp: string): string {
+  // HMAC-SHA256(uid, otp) — DB에는 hash만 저장
+  return createHmac('sha256', uid).update(otp).digest('hex')
+}
+
+// RFC 6238 TOTP (SHA-1, 30 sec step, 6 digits)
+function base32Encode(buf: Buffer): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+  let bits = '', out = ''
+  for (const b of buf) bits += b.toString(2).padStart(8, '0')
+  for (let i = 0; i + 5 <= bits.length; i += 5) out += alphabet[parseInt(bits.slice(i, i + 5), 2)]
+  return out
+}
+function base32Decode(s: string): Buffer {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+  const clean = s.toUpperCase().replace(/=+$/, '').replace(/\s+/g, '')
+  let bits = ''
+  for (const ch of clean) {
+    const v = alphabet.indexOf(ch)
+    if (v < 0) throw new Error('Invalid base32')
+    bits += v.toString(2).padStart(5, '0')
+  }
+  const bytes: number[] = []
+  for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2))
+  return Buffer.from(bytes)
+}
+function totpAt(secret: string, timestampMs: number): string {
+  const counter = Math.floor(timestampMs / 1000 / 30)
+  const buf = Buffer.alloc(8)
+  buf.writeUInt32BE(Math.floor(counter / 0x100000000), 0)
+  buf.writeUInt32BE(counter & 0xffffffff, 4)
+  const hmac = createHmac('sha1', base32Decode(secret)).update(buf).digest()
+  const offset = hmac[hmac.length - 1] & 0xf
+  const code = ((hmac[offset] & 0x7f) << 24) | ((hmac[offset + 1] & 0xff) << 16)
+    | ((hmac[offset + 2] & 0xff) << 8) | (hmac[offset + 3] & 0xff)
+  return String(code % 1000000).padStart(6, '0')
+}
+function totpVerify(secret: string, code: string, windowSize = 1): boolean {
+  const now = Date.now()
+  for (let w = -windowSize; w <= windowSize; w++) {
+    const candidate = totpAt(secret, now + w * 30 * 1000)
+    try {
+      if (candidate.length === code.length && timingSafeEqual(Buffer.from(candidate), Buffer.from(code))) return true
+    } catch { /* */ }
+  }
+  return false
+}
+
+async function sendOtpViaSms(phone: string, otp: string): Promise<void> {
+  const notifyDoc = await db.collection('settings').doc('notify').get()
+  const s = (notifyDoc.exists ? notifyDoc.data() : {}) as { sms?: { apiKey?: string; apiSecret?: string; from?: string; accessToken?: string; authType?: string } }
+  if (!s.sms?.from || (!s.sms.accessToken && !(s.sms.apiKey && s.sms.apiSecret))) throw new Error('SMS 발송 설정이 완료되지 않았습니다.')
+  let authorization: string
+  if (s.sms.authType === 'oauth2') {
+    authorization = `Bearer ${s.sms.accessToken}`
+  } else {
+    const date = new Date().toISOString()
+    const salt = randomBytes(16).toString('hex')
+    const sig = createHmac('sha256', s.sms.apiSecret!).update(date + salt).digest('hex')
+    authorization = `HMAC-SHA256 apiKey=${s.sms.apiKey}, date=${date}, salt=${salt}, signature=${sig}`
+  }
+  const text = `[LOFA 복지] 로그인 인증번호: ${otp} (5분 이내 입력)`
+  const r = await fetch('https://api.solapi.com/messages/v4/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: authorization },
+    body: JSON.stringify({ message: { to: phone, from: s.sms.from, text } }),
+  })
+  if (!r.ok) throw new Error(`SMS 발송 실패: ${await r.text()}`)
+}
+
+async function sendOtpViaEmail(toEmail: string, otp: string): Promise<void> {
+  const notifyDoc = await db.collection('settings').doc('notify').get()
+  const s = (notifyDoc.exists ? notifyDoc.data() : {}) as { email?: { from?: string; password?: string; accessToken?: string; refreshToken?: string; authType?: string } }
+  if (!s.email?.from) throw new Error('이메일 발송 설정이 완료되지 않았습니다.')
+  const transporter = s.email.authType === 'oauth2' && s.email.refreshToken
+    ? nodemailer.createTransport({ service: 'gmail', auth: { type: 'OAuth2', user: s.email.from, clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET, refreshToken: s.email.refreshToken, accessToken: s.email.accessToken } })
+    : nodemailer.createTransport({ host: 'smtp.gmail.com', port: 587, secure: false, auth: { user: s.email.from, pass: s.email.password } })
+  await transporter.sendMail({
+    from: `LOFA 복지 <${s.email.from}>`,
+    to: toEmail,
+    subject: '[LOFA 복지] 로그인 인증번호',
+    text: `로그인 인증번호: ${otp}\n5분 이내에 화면에 입력해주세요. 본인이 요청하지 않았다면 비밀번호를 즉시 변경해주세요.`,
+  })
+}
+
+// POST /api/mfa/send-otp { channel: 'sms'|'email' }
+app.post('/api/mfa/send-otp', async (req, res) => {
+  const decoded = await requireAuth(req, res)
+  if (!decoded) return
+  try {
+    const channel = String(req.body?.channel || '')
+    if (channel !== 'sms' && channel !== 'email') { res.status(400).json({ error: 'channel 은 sms 또는 email' }); return }
+    const userDoc = await db.collection('users').doc(decoded.uid).get()
+    if (!userDoc.exists) { res.status(404).json({ error: '사용자 정보가 없습니다.' }); return }
+    const u = userDoc.data() as Record<string, unknown>
+    // throttle
+    const existingSnap = await db.collection('mfa_codes').doc(decoded.uid).get()
+    if (existingSnap.exists) {
+      const last = (existingSnap.data()?.lastSentAt as admin.firestore.Timestamp | undefined)?.toMillis() || 0
+      if (Date.now() - last < OTP_RESEND_THROTTLE_MS) {
+        res.status(429).json({ error: '잠시 후 다시 시도해주세요.', retryAfter: Math.ceil((OTP_RESEND_THROTTLE_MS - (Date.now() - last)) / 1000) }); return
+      }
+    }
+    const otp = generateOtp()
+    const hash = hashOtp(decoded.uid, otp)
+    const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + OTP_TTL_MS)
+    await db.collection('mfa_codes').doc(decoded.uid).set({
+      hash, channel, expiresAt, attempts: 0, lastSentAt: FieldValue.serverTimestamp(),
+    })
+    if (channel === 'sms') {
+      const phone = String(u['전화번호'] || u['phone'] || '').replace(/[^0-9]/g, '')
+      if (!phone) throw new Error('등록된 전화번호가 없습니다.')
+      await sendOtpViaSms(phone, otp)
+      res.json({ status: 'sent', channel, hint: phone.slice(-4).padStart(phone.length, '*') })
+    } else {
+      const emailAddr = String(u['이메일'] || u['email'] || decoded.email || '')
+      if (!emailAddr) throw new Error('등록된 이메일이 없습니다.')
+      await sendOtpViaEmail(emailAddr, otp)
+      const at = emailAddr.indexOf('@')
+      const hint = at > 0 ? emailAddr.slice(0, 2) + '*'.repeat(Math.max(at - 2, 1)) + emailAddr.slice(at) : emailAddr
+      res.json({ status: 'sent', channel, hint })
+    }
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : 'send failed' })
+  }
+})
+
+// POST /api/mfa/verify-otp { code: '123456', mode: 'login'|'setup', method?: 'sms'|'email'|'totp' }
+app.post('/api/mfa/verify-otp', async (req, res) => {
+  const decoded = await requireAuth(req, res)
+  if (!decoded) return
+  try {
+    const code = String(req.body?.code || '').trim()
+    const mode = req.body?.mode === 'setup' ? 'setup' : 'login'
+    const method = String(req.body?.method || '') as 'sms' | 'email' | 'totp' | ''
+    if (!/^\d{6}$/.test(code)) { res.status(400).json({ error: '6자리 숫자를 입력해주세요.' }); return }
+
+    const userRef = db.collection('users').doc(decoded.uid)
+    const userDoc = await userRef.get()
+    const u = (userDoc.exists ? userDoc.data() : {}) as Record<string, unknown>
+
+    // 검증 방식 결정: 명시 > 사용자 기본 설정
+    const effectiveMethod = method || (u['mfaPreference'] as 'sms' | 'email' | 'totp' | undefined) || ''
+    if (!effectiveMethod) { res.status(400).json({ error: '인증 방식 정보가 없습니다.' }); return }
+
+    if (effectiveMethod === 'totp') {
+      const encSecret = mode === 'setup'
+        ? (u['totpPendingSecret'] as string | undefined)
+        : (u['totpSecret'] as string | undefined)
+      if (!encSecret) { res.status(400).json({ error: 'TOTP 설정이 없습니다. 다시 등록해주세요.' }); return }
+      const secret = decrypt(encSecret)
+      if (!totpVerify(secret, code)) { res.status(400).json({ error: '인증번호가 올바르지 않습니다.' }); return }
+      if (mode === 'setup') {
+        await userRef.update({
+          mfaPreference: 'totp',
+          totpSecret: encSecret,
+          totpPendingSecret: FieldValue.delete(),
+          lastMfaAt: FieldValue.serverTimestamp(),
+        })
+      } else {
+        await userRef.update({ lastMfaAt: FieldValue.serverTimestamp() })
+      }
+      res.json({ status: 'ok', method: 'totp' })
+      return
+    }
+
+    // sms / email 코드 검증
+    const codeRef = db.collection('mfa_codes').doc(decoded.uid)
+    const codeSnap = await codeRef.get()
+    if (!codeSnap.exists) { res.status(400).json({ error: '발송된 인증번호가 없습니다.' }); return }
+    const data = codeSnap.data() as { hash: string; channel: string; expiresAt: admin.firestore.Timestamp; attempts: number }
+    if (data.channel !== effectiveMethod) { res.status(400).json({ error: '다른 인증 방식의 코드입니다.' }); return }
+    if (data.expiresAt.toMillis() < Date.now()) { await codeRef.delete(); res.status(400).json({ error: '인증번호가 만료되었습니다. 다시 요청해주세요.' }); return }
+    if (data.attempts >= OTP_MAX_ATTEMPTS) { res.status(429).json({ error: '시도 횟수를 초과했습니다. 새 인증번호를 요청해주세요.' }); return }
+    const expectedHash = hashOtp(decoded.uid, code)
+    const ok = expectedHash === data.hash
+    if (!ok) {
+      await codeRef.update({ attempts: FieldValue.increment(1) })
+      res.status(400).json({ error: '인증번호가 올바르지 않습니다.', remainingAttempts: OTP_MAX_ATTEMPTS - data.attempts - 1 })
+      return
+    }
+    // 성공 — 코드 삭제, lastMfaAt 기록, (setup 모드면 preference 저장)
+    await codeRef.delete()
+    const update: Record<string, unknown> = { lastMfaAt: FieldValue.serverTimestamp() }
+    if (mode === 'setup') update.mfaPreference = effectiveMethod
+    await userRef.update(update)
+    res.json({ status: 'ok', method: effectiveMethod })
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : 'verify failed' })
+  }
+})
+
+// POST /api/mfa/totp-setup — 새 secret 생성 후 임시 저장, otpauth URI 반환
+app.post('/api/mfa/totp-setup', async (req, res) => {
+  const decoded = await requireAuth(req, res)
+  if (!decoded) return
+  try {
+    const userDoc = await db.collection('users').doc(decoded.uid).get()
+    const u = (userDoc.exists ? userDoc.data() : {}) as Record<string, unknown>
+    const secretRaw = randomBytes(20) // 160 bits
+    const secret = base32Encode(secretRaw)
+    const account = encodeURIComponent(String(u['이메일'] || u['email'] || decoded.email || decoded.uid))
+    const issuer = encodeURIComponent('LOFA 복지')
+    const otpauth = `otpauth://totp/${issuer}:${account}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`
+    await db.collection('users').doc(decoded.uid).update({ totpPendingSecret: encrypt(secret) })
+    res.json({ status: 'ok', secret, otpauth })
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : 'setup failed' })
+  }
+})
+
+// POST /api/mfa/set-preference { method: 'sms'|'email'|'totp' } — TOTP 외 방식 등록 시 즉시 등록 (sms/email 은 verify-otp 의 setup 모드로 자동 등록되지만, 메뉴얼 변경용)
+app.post('/api/mfa/set-preference', async (req, res) => {
+  const decoded = await requireAuth(req, res)
+  if (!decoded) return
+  try {
+    const method = String(req.body?.method || '')
+    if (!['sms', 'email', 'totp'].includes(method)) { res.status(400).json({ error: 'method invalid' }); return }
+    await db.collection('users').doc(decoded.uid).update({ mfaPreference: method })
+    res.json({ status: 'ok', method })
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : 'set failed' })
+  }
+})
+
+// POST /api/mfa/reset — 본인이 자기 MFA 재설정 (모든 mfa 필드 삭제). 관리자도 호출 가능 (target uid)
+app.post('/api/mfa/reset', async (req, res) => {
+  const decoded = await requireAuth(req, res)
+  if (!decoded) return
+  try {
+    const target = String(req.body?.uid || decoded.uid)
+    if (target !== decoded.uid) {
+      const adminDoc = await db.collection('users').doc(decoded.uid).get()
+      if (!adminDoc.exists || !adminDoc.data()?.isAdmin) { res.status(403).json({ error: '관리자 권한이 필요합니다.' }); return }
+    }
+    await db.collection('users').doc(target).update({
+      mfaPreference: FieldValue.delete(),
+      totpSecret: FieldValue.delete(),
+      totpPendingSecret: FieldValue.delete(),
+      lastMfaAt: FieldValue.delete(),
+    })
+    await db.collection('mfa_codes').doc(target).delete().catch(() => {})
+    res.json({ status: 'ok' })
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : 'reset failed' })
+  }
 })
 
 // ─── Export ───────────────────────────────────────────────────────────────────

@@ -90,5 +90,10 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow write: if isAdmin();
     }
+
+    // MFA OTP 코드 — 클라이언트에서 직접 접근 금지. Functions(admin SDK) 만 사용.
+    match /mfa_codes/{uid} {
+      allow read, write: if false;
+    }
   }
 }
