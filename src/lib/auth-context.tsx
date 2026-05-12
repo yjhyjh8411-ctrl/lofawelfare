@@ -27,7 +27,8 @@ interface UserProfile {
   name: string
   department: string
   position: string
-  email: string
+  email: string           // 회사 이메일
+  personalEmail: string   // 외부(개인) 이메일 — MFA OTP·신청 알림 발송용
   isAdmin: boolean
   status: string
   accountStatus: AccountStatus
@@ -121,6 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               department: data['부서'] || data['department'] || '',
               position: data['직급'] || data['position'] || '',
               email: data['이메일'] || data['email'] || firebaseUser.email || '',
+              personalEmail: data['외부이메일'] || data['개인이메일'] || data['personalEmail'] || '',
               isAdmin,
               status: data['status'] || 'active',
               accountStatus,
@@ -170,6 +172,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           department: data['부서'] || data['department'] || '',
           position: data['직급'] || data['position'] || '',
           email: data['이메일'] || data['email'] || user.email || '',
+          personalEmail: data['외부이메일'] || data['개인이메일'] || data['personalEmail'] || '',
           isAdmin,
           status: data['status'] || 'active',
           accountStatus,
@@ -198,8 +201,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (user.uid === 'admin') return
     // 세션 통과면 OK
     if (isMfaPassedInSession(user.uid)) return
-    // 미등록 → setup, 등록됨 → 입력
-    router.replace(profile.mfaPreference ? '/mfa' : '/mfa/setup')
+    // 외부이메일 미등록 또는 mfaPreference 미설정 → setup, 둘 다 있으면 /mfa
+    const needSetup = !profile.personalEmail || !profile.mfaPreference
+    router.replace(needSetup ? '/mfa/setup' : '/mfa')
   }, [user, profile, loading, pathname, router])
 
   return (

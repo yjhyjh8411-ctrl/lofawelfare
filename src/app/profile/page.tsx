@@ -12,7 +12,7 @@ export default function ProfilePage() {
   const { user, profile, loading, refreshProfile } = useAuth()
   const router = useRouter()
   const [form, setForm] = useState({
-    성명: '', 부서: '', 직급: '', 이메일: '', 전화번호: '', 입사일: '',
+    성명: '', 부서: '', 직급: '', 이메일: '', 외부이메일: '', 전화번호: '', 입사일: '',
   })
   const [pw, setPw] = useState({ current: '', newPw: '', confirm: '' })
   const [msg, setMsg] = useState('')
@@ -39,6 +39,7 @@ export default function ProfilePage() {
           부서: d['부서'] || '',
           직급: d['직급'] || '',
           이메일: d['이메일'] || '',
+          외부이메일: d['외부이메일'] || d['개인이메일'] || d['이메일'] || '',
           전화번호: d['전화번호'] || '',
           입사일: d['입사일'] || '',
         })
@@ -103,6 +104,7 @@ export default function ProfilePage() {
         부서: form.부서,
         직급: form.직급,
         이메일: form.이메일,
+        외부이메일: form.외부이메일,
         전화번호: form.전화번호,
         입사일: form.입사일,
       })
@@ -202,15 +204,29 @@ export default function ProfilePage() {
               <input type="date" value={form.입사일} onChange={e => setForm(p => ({ ...p, 입사일: e.target.value }))} className="profile-input" />
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
             <div>
-              <label style={labelStyle}>회사 이메일</label>
-              <input type="email" value={form.이메일} onChange={e => setForm(p => ({ ...p, 이메일: e.target.value }))} className="profile-input" />
+              <label style={labelStyle}>회사 이메일 <span style={{ fontSize: 10, color: '#9ca3af', fontWeight: 400 }}>(선택)</span></label>
+              <input type="email" value={form.이메일} onChange={e => setForm(p => ({ ...p, 이메일: e.target.value }))} className="profile-input" placeholder="hong@lofa.or.kr" />
             </div>
             <div>
               <label style={labelStyle}>전화번호</label>
               <input type="tel" value={form.전화번호} onChange={e => setForm(p => ({ ...p, 전화번호: e.target.value }))} className="profile-input" placeholder="010-1234-5678" />
             </div>
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <label style={labelStyle}>
+              📧 외부(개인) 이메일 <span style={{ fontSize: 10, color: '#dc2626', fontWeight: 700, marginLeft: 4 }}>2차 인증 발송용</span>
+            </label>
+            <input
+              type="email" value={form.외부이메일}
+              onChange={e => setForm(p => ({ ...p, 외부이메일: e.target.value }))}
+              className="profile-input"
+              placeholder="예: myname@gmail.com / naver.com"
+            />
+            <p style={{ color: '#9ca3af', fontSize: 11, marginTop: 4, lineHeight: 1.5 }}>
+              로그인 시 2차 인증 코드와 신청 결과 알림이 이 메일로 발송됩니다. 사내망 밖(휴대폰·집)에서 받을 수 있는 개인 이메일을 권장합니다.
+            </p>
           </div>
 
           {msg && (

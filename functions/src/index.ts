@@ -532,7 +532,7 @@ async function sendOtpViaSms(phone: string, otp: string): Promise<void> {
 async function sendOtpViaEmail(toEmail: string, otp: string): Promise<void> {
   const notifyDoc = await db.collection('settings').doc('notify').get()
   const s = (notifyDoc.exists ? notifyDoc.data() : {}) as { email?: { from?: string; password?: string; accessToken?: string; refreshToken?: string; authType?: string } }
-  if (!s.email?.from) throw new Error('이메일 발송 설정이 완료되지 않았습니다.')
+  if (!s.email?.from) throw new Error('이메일 발송 설정이 완료되지 않았습니다. 어드민 [알림설정]에서 발송 계정을 등록해주세요.')
   const transporter = s.email.authType === 'oauth2' && s.email.refreshToken
     ? nodemailer.createTransport({ service: 'gmail', auth: { type: 'OAuth2', user: s.email.from, clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET, refreshToken: s.email.refreshToken, accessToken: s.email.accessToken } })
     : nodemailer.createTransport({ host: 'smtp.gmail.com', port: 587, secure: false, auth: { user: s.email.from, pass: s.email.password } })
@@ -542,6 +542,14 @@ async function sendOtpViaEmail(toEmail: string, otp: string): Promise<void> {
     subject: '[LOFA 복지] 로그인 인증번호',
     text: `로그인 인증번호: ${otp}\n5분 이내에 화면에 입력해주세요. 본인이 요청하지 않았다면 비밀번호를 즉시 변경해주세요.`,
   })
+}
+
+/** OTP 발송용 이메일 결정 — 사내망 밖(휴대폰)에서도 받을 수 있도록 외부이메일 우선 */
+function pickOtpEmail(u: Record<string, unknown>, fallback?: string | null): string {
+  const external = String(u['외부이메일'] || u['개인이메일'] || u['personalEmail'] || '').trim()
+  if (external) return external
+  const company = String(u['이메일'] || u['email'] || fallback || '').trim()
+  return company
 }
 
 // POST /api/mfa/send-otp { channel: 'sms'|'email' }
@@ -574,12 +582,14 @@ app.post('/api/mfa/send-otp', async (req, res) => {
       await sendOtpViaSms(phone, otp)
       res.json({ status: 'sent', channel, hint: phone.slice(-4).padStart(phone.length, '*') })
     } else {
-      const emailAddr = String(u['이메일'] || u['email'] || decoded.email || '')
+      // 외부이메일 우선 — 사내망 밖 휴대폰에서도 받을 수 있도록
+      const emailAddr = pickOtpEmail(u, decoded.email)
       if (!emailAddr) throw new Error('등록된 이메일이 없습니다.')
       await sendOtpViaEmail(emailAddr, otp)
       const at = emailAddr.indexOf('@')
       const hint = at > 0 ? emailAddr.slice(0, 2) + '*'.repeat(Math.max(at - 2, 1)) + emailAddr.slice(at) : emailAddr
-      res.json({ status: 'sent', channel, hint })
+      const isExternal = !!(u['외부이메일'] || u['개인이메일'] || u['personalEmail'])
+      res.json({ status: 'sent', channel, hint, isExternal })
     }
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : 'send failed' })

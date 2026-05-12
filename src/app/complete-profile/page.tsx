@@ -89,6 +89,7 @@ export default function CompleteProfilePage() {
         전화번호: form.phone,
         입사일: form.hireDate,
         이메일: form.email || googleEmail,
+        외부이메일: form.email || googleEmail,  // MFA OTP 발송용 — 개인 이메일
         isAdmin: false,
         status: 'active',
         accountStatus: 'pending',
@@ -165,9 +166,11 @@ export default function CompleteProfilePage() {
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>이메일 (실제 이메일 주소)</label>
-            <input type="email" name="email" value={form.email} onChange={handleChange} placeholder="예: hong@lofa.or.kr" style={inputStyle} />
-            <p style={{ color: '#9ca3af', fontSize: 11, marginTop: 4 }}>로그인·알림 발송에 사용됩니다.</p>
+            <label style={labelStyle}>이메일 (개인/외부 이메일)</label>
+            <input type="email" name="email" value={form.email} onChange={handleChange} placeholder="예: myname@gmail.com / naver.com / daum.net" style={inputStyle} />
+            <p style={{ color: '#9ca3af', fontSize: 11, marginTop: 4 }}>
+              ⚠️ 사내망 밖(휴대폰)에서도 받을 수 있는 <strong>개인 이메일</strong>을 권장합니다. 2차 인증번호가 이 메일로 발송됩니다.
+            </p>
           </div>
 
           {error && (

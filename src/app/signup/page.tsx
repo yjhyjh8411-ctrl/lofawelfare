@@ -65,6 +65,7 @@ export default function SignupPage() {
         전화번호: form.phone,
         입사일: form.hireDate,
         이메일: form.email,
+        외부이메일: form.email,  // 가입 이메일 = 외부 이메일 — MFA OTP 발송용
         isAdmin: false,
         status: 'active',
         accountStatus: 'pending',
@@ -142,16 +143,18 @@ export default function SignupPage() {
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>이메일 (실제 이메일 주소)</label>
+            <label style={labelStyle}>이메일 (개인/외부 이메일)</label>
             <input
               type="email"
               name="email"
               value={form.email}
               onChange={handleChange}
-              placeholder="예: hong@lofa.or.kr"
+              placeholder="예: myname@gmail.com / naver.com / daum.net"
               style={inputStyle}
             />
-            <p style={{ color: '#9ca3af', fontSize: 11, marginTop: 4 }}>로그인 시 사용할 이메일입니다.</p>
+            <p style={{ color: '#9ca3af', fontSize: 11, marginTop: 4 }}>
+              ⚠️ 사내망 밖(휴대폰·집)에서도 받을 수 있는 <strong>개인 이메일</strong>로 가입해주세요. 로그인 시 이 메일로 2차 인증번호가 발송됩니다.
+            </p>
           </div>
 
           <div style={{ marginBottom: 14 }}>

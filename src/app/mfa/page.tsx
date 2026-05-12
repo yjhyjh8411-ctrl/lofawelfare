@@ -19,21 +19,19 @@ export default function MfaPage() {
     if (!loading && !user) router.replace('/login')
   }, [loading, user, router])
 
-  // 로딩 끝나고 mfaPreference 없으면 setup으로 자동 이동
+  // 외부이메일 미등록 또는 mfaPreference 없음 → setup으로
   useEffect(() => {
     if (loading) return
-    if (profile && !profile.mfaPreference) router.replace('/mfa/setup')
+    if (profile && (!profile.mfaPreference || !profile.personalEmail)) router.replace('/mfa/setup')
   }, [loading, profile, router])
 
-  // 처음 진입 시 SMS/이메일이면 자동 발송
+  // 진입 시 자동 발송
   useEffect(() => {
-    if (!user || !profile || autoSent) return
-    if (profile.mfaPreference === 'sms' || profile.mfaPreference === 'email') {
-      setAutoSent(true)
-      sendOtp()
-    }
+    if (!user || !profile?.personalEmail || autoSent) return
+    setAutoSent(true)
+    sendOtp()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, profile])
+  }, [user, profile?.personalEmail])
 
   const api = async (path: string, body?: object): Promise<{ ok: boolean; data: Record<string, unknown> }> => {
     if (!user) return { ok: false, data: { error: '로그인이 필요합니다.' } }
@@ -44,23 +42,21 @@ export default function MfaPage() {
   }
 
   const sendOtp = async () => {
-    if (!profile || profile.mfaPreference === 'totp' || !profile.mfaPreference) return
     setBusy(true); setMsg(null)
-    const r = await api('/api/mfa/send-otp', { channel: profile.mfaPreference })
+    const r = await api('/api/mfa/send-otp', { channel: 'email' })
     setBusy(false)
     if (!r.ok) { setMsg({ kind: 'err', text: String(r.data.error || '발송 실패') }); return }
     setHint(String(r.data.hint || ''))
-    setMsg({ kind: 'ok', text: `${profile.mfaPreference === 'sms' ? '문자' : '이메일'}을 발송했습니다.` })
+    setMsg({ kind: 'ok', text: '인증번호를 발송했습니다. 메일함을 확인해주세요. (스팸함 포함)' })
   }
 
   const verify = async () => {
-    if (!profile?.mfaPreference) return
     setBusy(true); setMsg(null)
-    const r = await api('/api/mfa/verify-otp', { code, mode: 'login', method: profile.mfaPreference })
+    const r = await api('/api/mfa/verify-otp', { code, mode: 'login', method: 'email' })
     setBusy(false)
     if (!r.ok) { setMsg({ kind: 'err', text: String(r.data.error || '검증 실패') }); return }
     markMfaPassedInSession(user!.uid)
-    router.replace(profile.isAdmin ? '/admin' : '/main')
+    router.replace(profile!.isAdmin ? '/admin' : '/main')
   }
 
   const handleLogout = async () => {
@@ -69,9 +65,7 @@ export default function MfaPage() {
   }
 
   if (loading || !user || !profile) return <div style={center}>로딩 중...</div>
-
-  const method = profile.mfaPreference
-  if (!method) return <div style={center}>2차 인증 설정으로 이동 중...</div>
+  if (!profile.personalEmail) return <div style={center}>2차 인증 설정으로 이동 중...</div>
 
   return (
     <div style={pageWrap}>
@@ -80,17 +74,18 @@ export default function MfaPage() {
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 800, margin: 0, color: '#111827' }}>2차 인증</h1>
             <p style={{ fontSize: 13, color: '#6b7280', marginTop: 6, marginBottom: 0 }}>
-              {method === 'totp' ? 'Google Authenticator 앱에 표시된 6자리 코드를 입력해주세요.'
-                : method === 'sms' ? `등록된 휴대폰으로 6자리 인증번호를 발송했습니다.${hint ? ` (${hint})` : ''}`
-                : `등록된 이메일로 6자리 인증번호를 발송했습니다.${hint ? ` (${hint})` : ''}`}
+              📧 <strong>{profile.personalEmail}</strong>{hint && ` (${hint})`} 로 6자리 인증번호를 발송했습니다.
             </p>
           </div>
           <button onClick={handleLogout} style={textBtn}>로그아웃</button>
         </div>
 
         <input
-          value={code} onChange={e => setCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
-          placeholder="6자리 코드" inputMode="numeric" autoFocus
+          value={code}
+          onChange={e => setCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+          placeholder="6자리 코드"
+          inputMode="numeric"
+          autoFocus
           style={otpInput}
         />
         {msg && (
@@ -102,15 +97,13 @@ export default function MfaPage() {
           <button onClick={verify} disabled={busy || code.length !== 6} style={btnPrimary(busy || code.length !== 6)}>
             {busy ? '확인 중...' : '확인'}
           </button>
-          {method !== 'totp' && (
-            <button onClick={sendOtp} disabled={busy} style={btnSecondary}>재발송</button>
-          )}
+          <button onClick={sendOtp} disabled={busy} style={btnSecondary}>재발송</button>
         </div>
 
         <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid #f3f4f6', fontSize: 11, color: '#9ca3af', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>현재 방식: {method === 'sms' ? '문자' : method === 'email' ? '이메일' : 'TOTP 앱'}</span>
+          <span>메일이 안 오면 스팸함을 확인하거나, 외부이메일을 변경하세요.</span>
           <button onClick={() => router.push('/mfa/setup')} style={{ background: 'none', border: 'none', color: '#1a56db', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}>
-            방식 변경
+            이메일 변경
           </button>
         </div>
       </div>
