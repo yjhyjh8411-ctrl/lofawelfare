@@ -111,6 +111,54 @@ app.post('/api/set-password', async (req, res) => {
   }
 })
 
+// POST /api/signup — 이메일/비밀번호 가입 + users doc 생성을 서버에서 원자적으로 처리
+// 클라이언트의 setDoc long-polling 채널 deadlock 회피용.
+app.post('/api/signup', async (req, res) => {
+  try {
+    const { email, password, employeeId, name, department, position, phone, hireDate } = req.body || {}
+    if (!email || !password || !employeeId || !name) {
+      res.status(400).json({ error: '필수 항목이 누락되었습니다.' }); return
+    }
+    if (String(password).length < 6) {
+      res.status(400).json({ error: '비밀번호는 6자 이상이어야 합니다.' }); return
+    }
+    // 이메일 중복 사전 확인
+    try {
+      const existing = await auth.getUserByEmail(String(email))
+      if (existing) { res.status(409).json({ error: '이미 사용 중인 이메일입니다.' }); return }
+    } catch { /* not-found OK */ }
+    // 사번 중복 확인
+    const empSnap = await db.collection('users').where('사번', '==', String(employeeId)).limit(1).get()
+    if (!empSnap.empty) {
+      res.status(409).json({ error: `사번 ${employeeId} 으로 이미 가입된 계정이 있습니다.` }); return
+    }
+    // Firebase Auth 사용자 생성
+    const userRecord = await auth.createUser({ email: String(email), password: String(password), displayName: String(name) })
+    // Firestore users doc 생성 (admin SDK 라 rules 우회)
+    await db.collection('users').doc(userRecord.uid).set({
+      사번: String(employeeId),
+      성명: String(name),
+      부서: String(department || ''),
+      직급: String(position || ''),
+      전화번호: String(phone || ''),
+      입사일: String(hireDate || ''),
+      이메일: String(email),
+      외부이메일: String(email),
+      isAdmin: false,
+      status: 'active',
+      accountStatus: 'pending',
+      createdAt: FieldValue.serverTimestamp(),
+    })
+    res.json({ status: 'ok', uid: userRecord.uid })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (msg.includes('email-already-exists') || msg.includes('email-already-in-use')) {
+      res.status(409).json({ error: '이미 사용 중인 이메일입니다.' }); return
+    }
+    res.status(500).json({ error: `가입 처리 실패: ${msg}` })
+  }
+})
+
 // POST /api/lookup-email
 app.post('/api/lookup-email', async (req, res) => {
   try {

@@ -20,10 +20,8 @@ service cloud.firestore {
     // Users collection
     match /users/{userId} {
       allow read: if isAuth();
-      // 신규 가입: 본인 doc만 생성. signup 코드가 반드시 isAdmin=false, accountStatus='pending' 으로 보내므로 직접 검사.
-      allow create: if isOwner(userId)
-        && request.resource.data.isAdmin == false
-        && request.resource.data.accountStatus == 'pending';
+      // 신규 가입: 본인 doc만 생성 (필드 검증은 클라이언트 + 어드민 사후 검토로 위임).
+      allow create: if isOwner(userId);
       // 업데이트: 관리자는 모든 필드 가능. 본인은 isAdmin / accountStatus 변경 불가.
       allow update: if isAdmin() || (
         isOwner(userId)

@@ -2,9 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createUserWithEmailAndPassword, signOut } from 'firebase/auth'
-import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore'
-import { auth, db } from '@/lib/firebase'
+import { signOut } from 'firebase/auth'
+import { auth } from '@/lib/firebase'
 
 export default function SignupPage() {
   const [form, setForm] = useState({
@@ -38,65 +37,38 @@ export default function SignupPage() {
     setLoading(true)
     setError('')
     try {
-      // 사전 중복 검사 — Functions endpoint 사용 (미인증 호출 가능, 5초 timeout). 사번 검사는 가입 후 어드민이 처리.
-      try {
-        const ac = new AbortController()
-        const t = setTimeout(() => ac.abort(), 5000)
-        const r = await fetch('/api/lookup-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: form.email.trim() }),
-          signal: ac.signal,
-        }).finally(() => clearTimeout(t))
-        const data = await r.json().catch(() => ({}))
-        if (data?.authEmail) {
-          setError('이미 같은 이메일로 가입된 계정이 있습니다. 로그인 또는 [비밀번호 찾기]를 이용해주세요.')
-          setLoading(false)
-          return
-        }
-      } catch (err) {
-        // lookup-email 실패해도 가입 진행 — createUserWithEmailAndPassword 가 firebase auth 레벨로 이중 차단
-        console.warn('[signup] lookup-email skipped:', err)
-      }
-      const cred = await createUserWithEmailAndPassword(auth, form.email, form.password)
-      await setDoc(doc(db, 'users', cred.user.uid), {
-        사번: form.employeeId,
-        성명: form.name,
-        부서: form.department,
-        직급: form.position,
-        전화번호: form.phone,
-        입사일: form.hireDate,
-        이메일: form.email,
-        외부이메일: form.email,  // 가입 이메일 = 외부 이메일 — MFA OTP 발송용
-        isAdmin: false,
-        status: 'active',
-        accountStatus: 'pending',
-        createdAt: serverTimestamp(),
+      // 가입은 Functions endpoint 가 admin SDK 로 원자적으로 처리 — 클라이언트 setDoc 의 long-polling 채널 이슈 회피
+      const r = await fetch('/api/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: form.email.trim(),
+          password: form.password,
+          employeeId: form.employeeId.trim(),
+          name: form.name.trim(),
+          department: form.department.trim(),
+          position: form.position.trim(),
+          phone: form.phone.trim(),
+          hireDate: form.hireDate,
+        }),
       })
-      // 가입 직후 즉시 로그아웃 — 관리자 승인 후 로그인 가능.
-      // signOut 은 fire-and-forget — Firestore listen 채널 cleanup 대기로 hang 하는 케이스를 피해
-      // 곧바로 hard navigation 실행. 페이지 새로 로드 시 firebase auth 상태가 재평가됨.
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        setError(String(data?.error || '회원가입 중 오류가 발생했습니다.'))
+        setLoading(false)
+        return
+      }
+      // 가입 성공 — 어떤 클라이언트 firebase 세션도 만들지 않음 (서버에서만 처리됨)
       try {
         sessionStorage.setItem('lofa_pending_reason', 'pending')
         sessionStorage.removeItem('lofa_profile_cache')
         sessionStorage.removeItem('lofa_mfa_pass')
       } catch { /* */ }
+      // 혹시 다른 흐름으로 firebase 세션이 살아있을 수도 있어 안전을 위해 signOut (fire-and-forget)
       signOut(auth).catch(() => {})
       window.location.replace('/login?pending=1')
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'code' in err) {
-        const code = (err as { code: string }).code
-        if (code === 'auth/email-already-in-use') {
-          setError('이미 사용 중인 이메일입니다.')
-        } else if (code === 'auth/invalid-email') {
-          setError('올바른 이메일 형식을 입력해주세요.')
-        } else {
-          setError('회원가입 중 오류가 발생했습니다.')
-        }
-      } else {
-        setError('회원가입 중 오류가 발생했습니다.')
-      }
-    } finally {
+    } catch {
+      setError('회원가입 중 오류가 발생했습니다.')
       setLoading(false)
     }
   }
