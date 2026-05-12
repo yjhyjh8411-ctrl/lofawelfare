@@ -38,24 +38,26 @@ export default function SignupPage() {
     setLoading(true)
     setError('')
     try {
-      // 같은 이메일 또는 사번으로 이미 가입된 사용자가 있는지 사전 확인
+      // 사전 중복 검사 — Functions endpoint 사용 (미인증 호출 가능, 5초 timeout). 사번 검사는 가입 후 어드민이 처리.
       try {
-        const checkEmail = form.email.trim().toLowerCase()
-        const checkEmp = form.employeeId.trim()
-        const all = await getDocs(collection(db, 'users'))
-        const dupEmail = all.docs.find(d => (d.data().이메일 || '').toLowerCase().trim() === checkEmail)
-        const dupEmp = checkEmp ? all.docs.find(d => (d.data().사번 || '').trim() === checkEmp) : null
-        if (dupEmp) {
-          setError(`사번 ${checkEmp} 으로 이미 가입된 계정이 있습니다. 기존 계정으로 로그인하거나 [비밀번호 찾기]를 이용해주세요.`)
+        const ac = new AbortController()
+        const t = setTimeout(() => ac.abort(), 5000)
+        const r = await fetch('/api/lookup-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: form.email.trim() }),
+          signal: ac.signal,
+        }).finally(() => clearTimeout(t))
+        const data = await r.json().catch(() => ({}))
+        if (data?.authEmail) {
+          setError('이미 같은 이메일로 가입된 계정이 있습니다. 로그인 또는 [비밀번호 찾기]를 이용해주세요.')
           setLoading(false)
           return
         }
-        if (dupEmail) {
-          setError('이미 같은 이메일로 가입된 계정이 있습니다. Google 로그인 또는 [비밀번호 찾기]를 이용해주세요.')
-          setLoading(false)
-          return
-        }
-      } catch (err) { console.error('[signup-dup-check] failed:', err) }
+      } catch (err) {
+        // lookup-email 실패해도 가입 진행 — createUserWithEmailAndPassword 가 firebase auth 레벨로 이중 차단
+        console.warn('[signup] lookup-email skipped:', err)
+      }
       const cred = await createUserWithEmailAndPassword(auth, form.email, form.password)
       await setDoc(doc(db, 'users', cred.user.uid), {
         사번: form.employeeId,
