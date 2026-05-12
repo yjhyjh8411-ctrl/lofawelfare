@@ -311,14 +311,20 @@ function AdminPageInner() {
   }
 
   const handleExportCSV = () => {
-    // 신청금액 = 4개 카테고리 총액 합계 (한 라인으로 보기). 개별 4개는 [개별 신청금액] 그룹으로 동행.
+    // 신청금액 = 4개 카테고리 총액 + 신청서 자체 '신청금액' 필드 합계 (한 라인으로 보기).
+    // 개별 4개 카테고리는 [개별 신청금액] 그룹으로 동행.
     const AMOUNT_KEYS: { key: string; label: string }[] = [
       { key: '총금액', label: '[개별 신청금액] 의료비' },
       { key: '문화활동총액', label: '[개별 신청금액] 근로자가족문화활동비' },
       { key: '생활복지총액', label: '[개별 신청금액] 돌봄비용' },
       { key: '예방접종총액', label: '[개별 신청금액] 예방접종' },
     ]
-    const amountKeySet = new Set(AMOUNT_KEYS.map(a => a.key))
+    // extraCols 에서 '신청금액' 라벨 중복 방지 — 합계 컬럼 한 줄로 흡수
+    const SUM_INTO_TOTAL_KEYS = ['신청금액']
+    const amountKeySet = new Set<string>([
+      ...AMOUNT_KEYS.map(a => a.key),
+      ...SUM_INTO_TOTAL_KEYS,
+    ])
     const dataKeys = new Set<string>()
     apps.forEach(a => { if (a.data) Object.keys(a.data).forEach(k => dataKeys.add(k)) })
     const extraCols = Array.from(dataKeys).filter(k => !amountKeySet.has(k))
@@ -361,6 +367,7 @@ function AdminPageInner() {
       const s = a.status === 'approved' ? '승인' : a.status === 'rejected' ? '반려' : '검토중'
       const base = [a.applicant?.사번||'', a.applicant?.성명||'', a.applicant?.부서||'', a.applicant?.직급||'', a.formTitle||'', d?d.toLocaleDateString('ko-KR'):'', s, a.reject_reason||'']
       const totalAmount = AMOUNT_KEYS.reduce((sum, { key }) => sum + toNum(a.data?.[key]), 0)
+        + SUM_INTO_TOTAL_KEYS.reduce((sum, key) => sum + toNum(a.data?.[key]), 0)
       const totalCell = totalAmount > 0 ? String(totalAmount) : ''
       const amounts = AMOUNT_KEYS.map(({ key }) => fmtValue(a.data?.[key]))
       const extra = extraCols.map(k => fmtValue(a.data?.[k]))
