@@ -57,8 +57,12 @@ export function clearMfaSession() {
   try { sessionStorage.removeItem(MFA_SESSION_KEY) } catch { /* */ }
 }
 
-/** MFA 가드 면제 경로 — 로그인 자체 흐름 페이지 */
-const MFA_EXEMPT_PATHS = ['/login', '/signup', '/complete-profile', '/mfa', '/mfa/setup', '/']
+/** MFA 가드 면제 경로 — 로그인 자체 흐름 페이지 (trailingSlash 호환) */
+const MFA_EXEMPT_PATHS = ['/login', '/signup', '/complete-profile', '/mfa', '/mfa/setup']
+function isExemptPath(pathname: string): boolean {
+  if (pathname === '/' || pathname === '') return true
+  return MFA_EXEMPT_PATHS.some(p => pathname === p || pathname === p + '/' || pathname.startsWith(p + '/'))
+}
 
 interface AuthContextType {
   user: User | null
@@ -187,19 +191,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (e) { console.error('Failed to refresh profile:', e) }
   }
 
-  // ─── MFA Gate — 로그인+프로필 있는데 MFA 미통과면 강제 라우팅 ────────────────────
+  // ─── Route Gate — 보호 페이지 접근 가드 ──────────────────────────────────────
   const router = useRouter()
   const pathname = usePathname()
   useEffect(() => {
     if (loading) return
-    if (!user || !profile) return
     if (typeof window === 'undefined') return
-    // 면제 경로
-    const exempt = MFA_EXEMPT_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'))
-    if (exempt) return
-    // 'admin' uid 는 면제 (긴급 백도어). 나머지는 모두 MFA 강제.
+    // 면제 경로면 무조건 통과
+    if (isExemptPath(pathname)) return
+    // 미로그인 → /login
+    if (!user) { router.replace('/login'); return }
+    // 'admin' uid 는 긴급 백도어 — 면제
     if (user.uid === 'admin') return
-    // 세션 통과면 OK
+    // user 는 있는데 profile 로드 실패/지연 → 안전을 위해 /login 으로 강제
+    if (!profile) { router.replace('/login'); return }
+    // 계정 미승인 (예: signup race condition으로 onAuthStateChanged 강제 logout 못 한 경우 보강)
+    if (!profile.isAdmin && profile.accountStatus !== 'approved') {
+      try { sessionStorage.setItem('lofa_pending_reason', profile.accountStatus) } catch { /* */ }
+      signOut(auth).finally(() => router.replace('/login'))
+      return
+    }
+    // MFA 세션 통과면 OK
     if (isMfaPassedInSession(user.uid)) return
     // 외부이메일 미등록 또는 mfaPreference 미설정 → setup, 둘 다 있으면 /mfa
     const needSetup = !profile.personalEmail || !profile.mfaPreference

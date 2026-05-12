@@ -71,10 +71,15 @@ export default function SignupPage() {
         accountStatus: 'pending',
         createdAt: serverTimestamp(),
       })
-      // 가입 직후 즉시 로그아웃 — 관리자 승인 후 로그인 가능
+      // 가입 직후 즉시 로그아웃 — 관리자 승인 후 로그인 가능.
+      // hard navigation 으로 AuthProvider 상태/캐시 완전 초기화 (client-side push는 race condition 발생 위험).
       try { await signOut(auth) } catch { /* */ }
-      try { sessionStorage.setItem('lofa_pending_reason', 'pending') } catch { /* */ }
-      router.push('/login?pending=1')
+      try {
+        sessionStorage.setItem('lofa_pending_reason', 'pending')
+        sessionStorage.removeItem('lofa_profile_cache')
+        sessionStorage.removeItem('lofa_mfa_pass')
+      } catch { /* */ }
+      window.location.replace('/login?pending=1')
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'code' in err) {
         const code = (err as { code: string }).code

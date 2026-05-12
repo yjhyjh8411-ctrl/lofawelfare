@@ -96,10 +96,15 @@ export default function CompleteProfilePage() {
         createdAt: serverTimestamp(),
       })
       try { sessionStorage.removeItem('signup_emp_id') } catch { /* */ }
-      // Google 가입 직후 즉시 로그아웃 — 관리자 승인 후 로그인 가능
+      // Google 가입 직후 즉시 로그아웃 — 관리자 승인 후 로그인 가능.
+      // hard navigation 으로 AuthProvider 상태/캐시 완전 초기화.
       try { await signOut(auth) } catch { /* */ }
-      try { sessionStorage.setItem('lofa_pending_reason', 'pending') } catch { /* */ }
-      router.push('/login?pending=1')
+      try {
+        sessionStorage.setItem('lofa_pending_reason', 'pending')
+        sessionStorage.removeItem('lofa_profile_cache')
+        sessionStorage.removeItem('lofa_mfa_pass')
+      } catch { /* */ }
+      window.location.replace('/login?pending=1')
     } catch {
       setError('프로필 저장 중 오류가 발생했습니다.')
     } finally {
