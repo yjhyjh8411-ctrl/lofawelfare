@@ -74,13 +74,14 @@ export default function SignupPage() {
         createdAt: serverTimestamp(),
       })
       // 가입 직후 즉시 로그아웃 — 관리자 승인 후 로그인 가능.
-      // hard navigation 으로 AuthProvider 상태/캐시 완전 초기화 (client-side push는 race condition 발생 위험).
-      try { await signOut(auth) } catch { /* */ }
+      // signOut 은 fire-and-forget — Firestore listen 채널 cleanup 대기로 hang 하는 케이스를 피해
+      // 곧바로 hard navigation 실행. 페이지 새로 로드 시 firebase auth 상태가 재평가됨.
       try {
         sessionStorage.setItem('lofa_pending_reason', 'pending')
         sessionStorage.removeItem('lofa_profile_cache')
         sessionStorage.removeItem('lofa_mfa_pass')
       } catch { /* */ }
+      signOut(auth).catch(() => {})
       window.location.replace('/login?pending=1')
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'code' in err) {
