@@ -49,3 +49,4 @@ next-env.d.ts
 # firebase functions build
 /functions/node_modules
 /functions/lib
+.playwright-mcp/
