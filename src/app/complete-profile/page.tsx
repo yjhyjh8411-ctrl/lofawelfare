@@ -91,10 +91,14 @@ export default function CompleteProfilePage() {
         이메일: form.email || googleEmail,
         isAdmin: false,
         status: 'active',
+        accountStatus: 'pending',
         createdAt: serverTimestamp(),
       })
       try { sessionStorage.removeItem('signup_emp_id') } catch { /* */ }
-      router.push('/main')
+      // Google 가입 직후 즉시 로그아웃 — 관리자 승인 후 로그인 가능
+      try { await signOut(auth) } catch { /* */ }
+      try { sessionStorage.setItem('lofa_pending_reason', 'pending') } catch { /* */ }
+      router.push('/login?pending=1')
     } catch {
       setError('프로필 저장 중 오류가 발생했습니다.')
     } finally {

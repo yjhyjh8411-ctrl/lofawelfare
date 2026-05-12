@@ -1,18 +1,39 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, sendPasswordResetEmail, signOut, deleteUser } from 'firebase/auth'
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase'
 import QRCorner from '@/components/QRCorner'
+import { resolveAccountStatus } from '@/lib/auth-context'
+
+const PENDING_MSG = '가입이 접수되었습니다. 사내근로복지기금 담당자(관리자)의 승인 후 로그인이 가능합니다.'
+const REJECTED_MSG = '계정이 거부되어 로그인할 수 없습니다. 사내근로복지기금 담당자에게 문의해주세요.'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
+
+  // 회원가입 직후 또는 미승인 강제로그아웃 시 안내 표시
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    let reason = ''
+    if (params.get('pending') === '1') reason = 'pending'
+    if (params.get('rejected') === '1') reason = 'rejected'
+    try {
+      const stored = sessionStorage.getItem('lofa_pending_reason')
+      if (stored && !reason) reason = stored
+      sessionStorage.removeItem('lofa_pending_reason')
+    } catch { /* */ }
+    if (reason === 'pending') setNotice(PENDING_MSG)
+    else if (reason === 'rejected') setNotice(REJECTED_MSG)
+  }, [])
   // 비밀번호 찾기 모달
   const [resetOpen, setResetOpen] = useState(false)
   const [resetEmail, setResetEmail] = useState('')
@@ -24,14 +45,30 @@ export default function LoginPage() {
   const [googleModalErr, setGoogleModalErr] = useState('')
   const router = useRouter()
 
+  /** 로그인 직후 user doc의 accountStatus 검사 — pending/rejected 면 강제 로그아웃 후 안내 */
+  const gateByAccountStatus = async (uid: string): Promise<{ ok: boolean; isAdmin: boolean }> => {
+    const ud = await getDoc(doc(db, 'users', uid))
+    if (!ud.exists()) return { ok: true, isAdmin: false }
+    const data = ud.data() as Record<string, unknown>
+    const isAdmin = data['isAdmin'] === true || ud.id === 'admin' || data['role'] === 'admin'
+    const accountStatus = resolveAccountStatus(data, isAdmin)
+    if (!isAdmin && accountStatus !== 'approved') {
+      try { await signOut(auth) } catch { /* */ }
+      setError(accountStatus === 'rejected' ? REJECTED_MSG : PENDING_MSG)
+      return { ok: false, isAdmin }
+    }
+    return { ok: true, isAdmin }
+  }
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email || !password) { setError('이메일과 비밀번호를 입력해주세요.'); return }
     setLoading(true); setError('')
     try {
       const cred = await signInWithEmailAndPassword(auth, email, password)
-      const ud = await getDoc(doc(db, 'users', cred.user.uid))
-      router.push(ud.exists() && (ud.data()?.role === 'admin' || ud.data()?.isAdmin) ? '/admin' : '/main')
+      const gate = await gateByAccountStatus(cred.user.uid)
+      if (!gate.ok) { setLoading(false); return }
+      router.push(gate.isAdmin ? '/admin' : '/main')
     } catch {
       try {
         const res = await fetch('/api/lookup-email', {
@@ -42,8 +79,9 @@ export default function LoginPage() {
         const data = await res.json()
         if (data.authEmail && data.authEmail !== email) {
           const cred2 = await signInWithEmailAndPassword(auth, data.authEmail, password)
-          const ud2 = await getDoc(doc(db, 'users', cred2.user.uid))
-          router.push(ud2.exists() && ud2.data()?.role === 'admin' ? '/admin' : '/main')
+          const gate2 = await gateByAccountStatus(cred2.user.uid)
+          if (!gate2.ok) { setLoading(false); return }
+          router.push(gate2.isAdmin ? '/admin' : '/main')
           return
         }
       } catch { /* lookup 실패 시 무시 */ }
@@ -123,10 +161,20 @@ export default function LoginPage() {
           setGoogleModalErr(`입력한 사번(${empId})이 등록된 사번(${ownEmp})과 다릅니다.`)
           return
         }
+        // 승인상태 게이트
+        const ud = own.data()
+        const isAdmin = ud.isAdmin === true || own.id === 'admin' || ud.role === 'admin'
+        const accountStatus = resolveAccountStatus(ud, isAdmin)
+        if (!isAdmin && accountStatus !== 'approved') {
+          try { await signOut(auth) } catch { /* */ }
+          setGoogleModalOpen(false)
+          setGoogleLoading(false)
+          setError(accountStatus === 'rejected' ? REJECTED_MSG : PENDING_MSG)
+          return
+        }
         // 정상 로그인
         setGoogleModalOpen(false)
-        const ud = own.data()
-        router.push((ud.role === 'admin' || ud.isAdmin) ? '/admin' : '/main')
+        router.push(isAdmin ? '/admin' : '/main')
         return
       }
 
@@ -211,6 +259,12 @@ export default function LoginPage() {
               onBlur={e => e.target.style.borderColor = '#d1d5db'}
             />
           </div>
+
+          {notice && !error && (
+            <div style={{ background: '#fef9c3', border: '1px solid #facc15', borderRadius: 8, padding: '10px 14px', color: '#854d0e', fontSize: 13, marginBottom: 16, whiteSpace: 'pre-line', lineHeight: 1.5 }}>
+              ⏳ {notice}
+            </div>
+          )}
 
           {error && (
             <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', color: '#dc2626', fontSize: 13, marginBottom: 16, whiteSpace: 'pre-line', lineHeight: 1.5 }}>

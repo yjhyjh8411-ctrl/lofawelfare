@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createUserWithEmailAndPassword } from 'firebase/auth'
+import { createUserWithEmailAndPassword, signOut } from 'firebase/auth'
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase'
 
@@ -67,9 +67,13 @@ export default function SignupPage() {
         이메일: form.email,
         isAdmin: false,
         status: 'active',
+        accountStatus: 'pending',
         createdAt: serverTimestamp(),
       })
-      router.push('/main')
+      // 가입 직후 즉시 로그아웃 — 관리자 승인 후 로그인 가능
+      try { await signOut(auth) } catch { /* */ }
+      try { sessionStorage.setItem('lofa_pending_reason', 'pending') } catch { /* */ }
+      router.push('/login?pending=1')
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'code' in err) {
         const code = (err as { code: string }).code

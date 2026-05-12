@@ -20,8 +20,16 @@ service cloud.firestore {
     // Users collection
     match /users/{userId} {
       allow read: if isAuth();
-      allow create: if isOwner(userId);
-      allow update, delete: if isOwner(userId) || isAdmin();
+      // 신규 가입: 본인 doc만 생성. isAdmin은 false, accountStatus는 'pending' 강제 (또는 미설정).
+      allow create: if isOwner(userId)
+        && (!('isAdmin' in request.resource.data) || request.resource.data.isAdmin == false)
+        && (!('accountStatus' in request.resource.data) || request.resource.data.accountStatus == 'pending');
+      // 업데이트: 관리자는 모든 필드 가능. 본인은 isAdmin / accountStatus 변경 불가.
+      allow update: if isAdmin() || (
+        isOwner(userId)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin', 'accountStatus'])
+      );
+      allow delete: if isAdmin() || isOwner(userId);
     }
 
     // Applications collection

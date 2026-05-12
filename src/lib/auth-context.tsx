@@ -1,9 +1,19 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, useRef } from 'react'
-import { User, onAuthStateChanged } from 'firebase/auth'
+import { User, onAuthStateChanged, signOut } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase'
+
+export type AccountStatus = 'pending' | 'approved' | 'rejected'
+
+/** accountStatus 미설정 = 기존 사용자 → 'approved' 로 간주 (역호환) */
+export function resolveAccountStatus(data: Record<string, unknown> | undefined, isAdmin: boolean): AccountStatus {
+  if (isAdmin) return 'approved'
+  const v = data?.['accountStatus']
+  if (v === 'pending' || v === 'rejected' || v === 'approved') return v
+  return 'approved'
+}
 
 const PROFILE_CACHE_KEY = 'lofa_profile_cache'
 const PROFILE_CACHE_TTL = 5 * 60 * 1000 // 5분
@@ -17,6 +27,7 @@ interface UserProfile {
   email: string
   isAdmin: boolean
   status: string
+  accountStatus: AccountStatus
   hireDate?: string
   phone?: string
 }
@@ -63,6 +74,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid))
           if (userDoc.exists()) {
             const data = userDoc.data()
+            const isAdmin = data['isAdmin'] === true || userDoc.id === 'admin'
+            const accountStatus = resolveAccountStatus(data, isAdmin)
+            // 미승인/거부 계정은 즉시 강제 로그아웃 (관리자 제외)
+            if (!isAdmin && accountStatus !== 'approved') {
+              try { sessionStorage.setItem('lofa_pending_reason', accountStatus) } catch { /* */ }
+              await signOut(auth)
+              setProfile(null)
+              lastFetchedUid.current = null
+              setLoading(false)
+              return
+            }
             const p: UserProfile = {
               uid: firebaseUser.uid,
               employeeId: data['사번'] || data['employeeId'] || '',
@@ -70,8 +92,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               department: data['부서'] || data['department'] || '',
               position: data['직급'] || data['position'] || '',
               email: data['이메일'] || data['email'] || firebaseUser.email || '',
-              isAdmin: data['isAdmin'] === true || userDoc.id === 'admin',
+              isAdmin,
               status: data['status'] || 'active',
+              accountStatus,
               hireDate: data['입사일'] || data['hireDate'] || '',
               phone: data['전화번호'] || data['phone'] || '',
             }
@@ -98,6 +121,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const userDoc = await getDoc(doc(db, 'users', user.uid))
       if (userDoc.exists()) {
         const data = userDoc.data()
+        const isAdmin = data['isAdmin'] === true || userDoc.id === 'admin'
+        const accountStatus = resolveAccountStatus(data, isAdmin)
+        if (!isAdmin && accountStatus !== 'approved') {
+          try { sessionStorage.setItem('lofa_pending_reason', accountStatus) } catch { /* */ }
+          await signOut(auth)
+          setProfile(null)
+          lastFetchedUid.current = null
+          return
+        }
         const p: UserProfile = {
           uid: user.uid,
           employeeId: data['사번'] || data['employeeId'] || '',
@@ -105,8 +137,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           department: data['부서'] || data['department'] || '',
           position: data['직급'] || data['position'] || '',
           email: data['이메일'] || data['email'] || user.email || '',
-          isAdmin: data['isAdmin'] === true || userDoc.id === 'admin',
+          isAdmin,
           status: data['status'] || 'active',
+          accountStatus,
           hireDate: data['입사일'] || data['hireDate'] || '',
           phone: data['전화번호'] || data['phone'] || '',
         }

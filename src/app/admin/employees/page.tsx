@@ -18,9 +18,15 @@ interface UserDoc {
   전화번호?: string
   입사일?: string
   isAdmin?: boolean
-  status?: string  // 'active' | 'inactive' | 'leave'
+  status?: string  // 'active' | 'inactive' | 'leave' (재직상태)
+  accountStatus?: 'pending' | 'approved' | 'rejected'  // 계정 승인상태 (없으면 approved 로 간주)
   leaveStart?: string
   leaveEnd?: string
+}
+
+const resolveAccount = (u: UserDoc): 'pending' | 'approved' | 'rejected' => {
+  if (u.isAdmin) return 'approved'
+  return u.accountStatus || 'approved'
 }
 
 
@@ -225,13 +231,31 @@ export default function EmployeesPage() {
   const finalFiltered = filtered
     .filter(u => !deptFilter || u.부서 === deptFilter)
     .filter(u => !roleFilter || (roleFilter === 'admin' ? u.isAdmin : !u.isAdmin))
-    .filter(u => !statusFilter || u.status === statusFilter)
+    .filter(u => {
+      if (!statusFilter) return true
+      if (statusFilter === 'pending_account') return resolveAccount(u) === 'pending'
+      if (statusFilter === 'rejected_account') return resolveAccount(u) === 'rejected'
+      return u.status === statusFilter
+    })
 
   const totalCount = users.length
   const employeeCount = users.filter(u => !u.isAdmin && u.status !== 'inactive' && u.status !== 'leave').length
   const adminCount = users.filter(u => u.isAdmin).length
   const leaveCount = users.filter(u => u.status === 'leave').length
   const inactiveCount = users.filter(u => u.status === 'inactive').length
+  const pendingCount = users.filter(u => resolveAccount(u) === 'pending').length
+
+  const handleApproveAccount = async (u: UserDoc) => {
+    await updateDoc(doc(db, 'users', u.id), { accountStatus: 'approved' })
+    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, accountStatus: 'approved' } : x))
+    showMsg(`${u.성명 || u.이메일 || u.id} 계정을 승인했습니다.`)
+  }
+  const handleRejectAccount = async (u: UserDoc) => {
+    if (!confirm(`${u.성명 || u.이메일 || u.id} 계정을 거부 처리하시겠습니까? 로그인이 차단됩니다.`)) return
+    await updateDoc(doc(db, 'users', u.id), { accountStatus: 'rejected' })
+    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, accountStatus: 'rejected' } : x))
+    showMsg(`${u.성명 || u.이메일 || u.id} 계정을 거부했습니다.`)
+  }
 
   if (loading || !profile?.isAdmin) return null
 
@@ -297,11 +321,32 @@ export default function EmployeesPage() {
           </div>
         )}
 
+        {/* 승인 대기 배너 */}
+        {pendingCount > 0 && (
+          <div style={{ background: '#fef9c3', border: '1px solid #facc15', borderRadius: 12, padding: '14px 18px', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 22 }}>⏳</span>
+            <div style={{ flex: 1 }}>
+              <strong style={{ color: '#854d0e', fontSize: 14 }}>승인 대기 {pendingCount}명</strong>
+              <div style={{ color: '#854d0e', fontSize: 12, marginTop: 2 }}>
+                신규 가입자는 관리자가 승인해야 로그인할 수 있습니다. 아래 표 [계정승인] 컬럼에서 승인/거부하세요.
+              </div>
+            </div>
+            <button
+              onClick={() => setStatusFilter('pending_account')}
+              style={{ background: '#854d0e', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+            >대기자만 보기</button>
+          </div>
+        )}
+
         {/* Stats cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 14, marginBottom: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 14, marginBottom: 24 }}>
           <div style={statsCardStyle}>
             <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>전체 이용자</div>
             <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{totalCount}명</div>
+          </div>
+          <div style={statsCardStyle}>
+            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>승인대기</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#d97706' }}>{pendingCount}명</div>
           </div>
           <div style={statsCardStyle}>
             <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>직원</div>
@@ -342,6 +387,8 @@ export default function EmployeesPage() {
           </select>
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={filterSelectStyle}>
             <option value="">전체 상태</option>
+            <option value="pending_account">⏳ 승인대기</option>
+            <option value="rejected_account">🚫 거부됨</option>
             <option value="active">재직</option>
             <option value="leave">휴직</option>
             <option value="inactive">퇴사</option>
@@ -359,20 +406,21 @@ export default function EmployeesPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
               <tr style={{ background: '#1a56db' }}>
-                {['이름', '사번', '입사일자', '비밀번호', '부서', '권한', '승인', '관리'].map(h => (
+                {['이름', '사번', '입사일자', '비밀번호', '부서', '권한', '재직상태', '계정승인', '관리'].map(h => (
                   <th key={h} style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', fontSize: 13 }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {dataLoading ? (
-                <tr><td colSpan={8} style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>로딩 중...</td></tr>
+                <tr><td colSpan={9} style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>로딩 중...</td></tr>
               ) : finalFiltered.length === 0 ? (
-                <tr><td colSpan={8} style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>직원이 없습니다.</td></tr>
+                <tr><td colSpan={9} style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>직원이 없습니다.</td></tr>
               ) : finalFiltered.map((u, idx) => {
                 const statusLabel = u.status === 'inactive' ? '퇴사' : u.status === 'leave' ? '휴직' : '재직'
                 const statusBg = u.status === 'inactive' ? '#fee2e2' : u.status === 'leave' ? '#fef3c7' : '#d1fae5'
                 const statusColor = u.status === 'inactive' ? '#991b1b' : u.status === 'leave' ? '#92400e' : '#065f46'
+                const acc = resolveAccount(u)
                 return (
                 <tr key={u.id} style={{ borderBottom: '1px solid #f3f4f6', background: idx % 2 === 0 ? '#fff' : '#fafafa', opacity: u.status === 'inactive' ? 0.55 : u.status === 'leave' ? 0.75 : 1 }}>
                   <td style={{ padding: '12px 16px', fontWeight: 600, color: '#111827', textAlign: 'center' }}>{u.성명 || '-'}</td>
@@ -405,6 +453,26 @@ export default function EmployeesPage() {
                     </span>
                     {u.status === 'leave' && u.leaveStart && (
                       <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>{u.leaveStart} ~ {u.leaveEnd}</div>
+                    )}
+                  </td>
+                  <td style={{ padding: '12px 16px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                    {u.isAdmin ? (
+                      <span style={{ background: '#e0e7ff', color: '#3730a3', padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600 }}>관리자</span>
+                    ) : acc === 'pending' ? (
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+                        <button onClick={() => handleApproveAccount(u)} style={{ background: '#059669', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>승인</button>
+                        <button onClick={() => handleRejectAccount(u)} style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>거부</button>
+                      </div>
+                    ) : acc === 'rejected' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                        <span style={{ background: '#fee2e2', color: '#991b1b', padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600 }}>거부됨</span>
+                        <button onClick={() => handleApproveAccount(u)} style={{ background: '#059669', color: '#fff', border: 'none', borderRadius: 6, padding: '3px 8px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>재승인</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                        <span style={{ background: '#d1fae5', color: '#065f46', padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600 }}>승인됨</span>
+                        <button onClick={() => handleRejectAccount(u)} style={{ background: 'none', color: '#9ca3af', border: '1px solid #e5e7eb', borderRadius: 6, padding: '2px 8px', fontSize: 10, cursor: 'pointer' }}>차단</button>
+                      </div>
                     )}
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'center' }}>
