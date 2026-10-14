@@ -8,8 +8,8 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuth() && (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true ||
-        request.auth.uid == 'admin'
+        request.auth.uid == 'admin' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true
       );
     }
 
@@ -18,11 +18,12 @@ service cloud.firestore {
     }
 
     // Users collection
+    // - 로그인한 사용자는 전체 users 조회 가능 (사번/이메일 중복 가입 방지 3계층 중 클라이언트 레이어가 사용)
+    // - 신규 가입: 본인 doc 만 생성
+    // - 업데이트: 본인은 isAdmin/accountStatus 변경 불가
     match /users/{userId} {
       allow read: if isAuth();
-      // 신규 가입: 본인 doc만 생성 (필드 검증은 클라이언트 + 어드민 사후 검토로 위임).
       allow create: if isOwner(userId);
-      // 업데이트: 관리자는 모든 필드 가능. 본인은 isAdmin / accountStatus 변경 불가.
       allow update: if isAdmin() || (
         isOwner(userId)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin', 'accountStatus'])
@@ -31,65 +32,89 @@ service cloud.firestore {
     }
 
     // Applications collection
+    // - 생성: 본인 user_id 로만, status='pending' 강제 (셀프 승인 방지)
+    // - 수정: 관리자는 자유. 본인은 pending/rejected/cancelled → pending 재제출만 허용 (수정 재신청)
+    // - 삭제: 관리자는 자유. 본인은 pending(검토중) / cancelled(취소) / rejected(반려) 상태에서 가능
+    //   (취소·반려 영구삭제, 검토중 취소 플로우 등 사용자 셀프 서비스 지원)
     match /applications/{appId} {
       allow read: if isAuth() && (
         isAdmin() ||
         resource.data.user_id == request.auth.uid ||
         resource.data['applicant']['사번'] == get(/databases/$(database)/documents/users/$(request.auth.uid)).data['사번']
       );
-      allow create: if isAuth();
-      allow update, delete: if isAdmin() || resource.data.user_id == request.auth.uid;
+      allow create: if isAuth()
+        && request.resource.data.user_id == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow update: if isAdmin() || (
+        isAuth() &&
+        resource.data.user_id == request.auth.uid &&
+        request.resource.data.user_id == resource.data.user_id &&
+        (
+          // 재제출 (수정 완료): pending/rejected/cancelled → pending
+          (resource.data.status in ['pending', 'rejected', 'cancelled'] &&
+           request.resource.data.status == 'pending') ||
+          // 사용자 취소: pending → cancelled
+          (resource.data.status == 'pending' &&
+           request.resource.data.status == 'cancelled')
+        )
+      );
+      allow delete: if isAdmin() || (
+        isAuth() &&
+        resource.data.user_id == request.auth.uid &&
+        resource.data.status in ['pending', 'cancelled', 'rejected']
+      );
     }
 
-    // Form configs - read by all authenticated, write by admin only
+    // Form configs
     match /form_configs/{formId} {
       allow read: if isAuth();
       allow write: if isAdmin();
     }
 
-    // Budget groups - read by authenticated, write by admin
+    // Budget groups
     match /budget_groups/{groupId} {
       allow read: if isAuth();
       allow write: if isAdmin();
     }
 
-    // Settings - read by all, write by admin only
+    // Settings
+    // - notify(SMS/이메일 비밀키)는 관리자만 읽기 가능
+    // - global 등 공개 설정은 로그아웃 상태에서도 노출될 수 있어야 하므로 전체 공개 (쓰기만 admin)
     match /settings/{settingId} {
-      allow read: if true;
+      allow read: if settingId == 'notify' ? isAdmin() : true;
       allow write: if isAdmin();
     }
 
-    // Regulations - read by authenticated, write by admin
+    // Regulations
     match /regulations/{regId} {
       allow read: if isAuth();
       allow write: if isAdmin();
     }
 
-    // Settlements - read by authenticated, write by admin
+    // Settlements
     match /settlements/{docId} {
       allow read: if isAuth();
       allow write: if isAdmin();
     }
 
-    // Notices (게시판) - read by all authenticated, write by admin
+    // Notices (게시판)
     match /notices/{noticeId} {
       allow read: if isAuth();
       allow write: if isAdmin();
     }
 
-    // FAQs - read by all authenticated, write by admin
+    // FAQs
     match /faqs/{faqId} {
       allow read: if isAuth();
       allow write: if isAdmin();
     }
 
-    // Budgets (연간 예산) - read & write by admin only
+    // Budgets (연간 예산) - 관리자 전용
     match /budgets/{year} {
-      allow read: if isAdmin();
-      allow write: if isAdmin();
+      allow read, write: if isAdmin();
     }
 
-    // MFA OTP 코드 — 클라이언트에서 직접 접근 금지. Functions(admin SDK) 만 사용.
+    // MFA OTP 코드 — 클라이언트 직접 접근 금지 (Functions admin SDK 전용)
     match /mfa_codes/{uid} {
       allow read, write: if false;
     }

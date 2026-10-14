@@ -115,8 +115,8 @@ export default function ApplyPage() {
   const [fileValues, setFileValues] = useState<Record<string, File[]>>({})
   const [existingFiles, setExistingFiles] = useState<Record<string, { url: string; name: string; size?: number }[]>>({})
 
-  // 첨부파일 총 용량 제한 (보험료 신청 등 다중 첨부 시)
-  const MAX_TOTAL_BYTES = 32 * 1024 * 1024 // 32MB
+  // 첨부파일 총 용량 제한 (32MB)
+  const MAX_TOTAL_BYTES = 32 * 1024 * 1024
   const [dynRows, setDynRows] = useState<Record<string, Record<string, string>[]>>({})
   const [privacyConsent, setPrivacyConsent] = useState(false)
   const [loanConsent, setLoanConsent] = useState(false)
@@ -125,6 +125,7 @@ export default function ApplyPage() {
   const [housingAddress, setHousingAddress] = useState('')
   const [housingStart, setHousingStart] = useState('')
   const [housingEnd, setHousingEnd] = useState('')
+  const [editLocked, setEditLocked] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
@@ -154,7 +155,14 @@ export default function ApplyPage() {
       if (editId) {
         const appSnap = await getDoc(doc(db, 'applications', editId))
         if (appSnap.exists()) {
-          const appData = appSnap.data().data as Record<string, unknown>
+          const rawDoc = appSnap.data()
+          // 승인 완료된 신청서는 수정 차단
+          if (rawDoc.status === 'approved') {
+            setEditLocked(true)
+            setError('이미 승인 완료된 신청서는 수정할 수 없습니다.')
+            return
+          }
+          const appData = rawDoc.data as Record<string, unknown>
           const initVals: Record<string, string> = {}
           const initFiles: Record<string, { url: string; name: string; size?: number }[]> = {}
           for (const f of cfg.fields) {
@@ -167,7 +175,6 @@ export default function ApplyPage() {
                 initVals[f.id + '_holder'] = m[3]
               }
             } else if (f.type === 'file' && val) {
-              // 신규: 배열 / 기존: 단일 객체 둘 다 호환
               if (Array.isArray(val)) {
                 initFiles[f.id] = (val as Record<string, unknown>[])
                   .filter(o => o && typeof o.url === 'string' && typeof o.name === 'string')
@@ -189,12 +196,10 @@ export default function ApplyPage() {
           setPrivacyConsent(true)
           if (cfg.fields.some(f => f.type === 'loan_agreement') || cfg.대부동의필요) setLoanConsent(true)
           if (cfg.fields.some(f => f.type === 'housing_agreement') || cfg.무주택서약필요) setHousingConsent(true)
-          // 주택자금 추가 입력값 복원
-          const ad = appSnap.data().data as Record<string, unknown>
-          if (typeof ad?.['주택구입(임차)지역'] === 'string') setHousingRegion(ad['주택구입(임차)지역'] as string)
-          if (typeof ad?.['주택자금 주소'] === 'string') setHousingAddress(ad['주택자금 주소'] as string)
-          if (typeof ad?.['무주택기간 시작'] === 'string') setHousingStart(ad['무주택기간 시작'] as string)
-          if (typeof ad?.['무주택기간 종료'] === 'string') setHousingEnd(ad['무주택기간 종료'] as string)
+          if (typeof appData?.['주택구입(임차)지역'] === 'string') setHousingRegion(appData['주택구입(임차)지역'] as string)
+          if (typeof appData?.['주택자금 주소'] === 'string') setHousingAddress(appData['주택자금 주소'] as string)
+          if (typeof appData?.['무주택기간 시작'] === 'string') setHousingStart(appData['무주택기간 시작'] as string)
+          if (typeof appData?.['무주택기간 종료'] === 'string') setHousingEnd(appData['무주택기간 종료'] as string)
         }
       }
       setDynRows(initDyn)
@@ -217,6 +222,8 @@ export default function ApplyPage() {
     if (!formConfig) return []
     const map = new Map<string, FormField[]>()
     for (const f of formConfig.fields) {
+      // loan_agreement, housing_agreement 는 하단 전용 섹션에서 통합 렌더링하므로 일반 섹션에서 제외 (중복 방지)
+      if (f.type === 'loan_agreement' || f.type === 'housing_agreement') continue
       const sec = f.section || '신청 내용'
       if (!map.has(sec)) map.set(sec, [])
       map.get(sec)!.push(f)
@@ -227,6 +234,12 @@ export default function ApplyPage() {
   const hasLoan = (formConfig?.대부동의필요 === true) || (formConfig?.fields.some(f => f.type === 'loan_agreement') ?? false)
   const hasHousing = (formConfig?.무주택서약필요 === true) || (formConfig?.fields.some(f => f.type === 'housing_agreement') ?? false)
 
+  const triggerFieldId = formConfig?.무주택서약조건필드ID
+  const triggerValues = formConfig?.무주택서약조건값들 || []
+  const housingTriggered = hasHousing && (
+    !triggerFieldId ? true : triggerValues.includes(values[triggerFieldId] || '')
+  )
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user || !profile || !formConfig) return
@@ -234,14 +247,10 @@ export default function ApplyPage() {
       setError(msg)
       setTimeout(() => document.getElementById('submit-error')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
     }
+    if (editLocked) { showError('이미 승인 완료된 신청서는 수정할 수 없습니다.'); return }
     if (hasLoan && profile?.status === 'leave') { showError('휴직 중인 직원은 대부사업 신청이 제한됩니다. (제7조 1항)'); return }
     if (hasLoan && !loanConsent) { showError('[서식2] 대부규정 준수 동의서에 동의해주세요.'); return }
-    // 무주택서약 조건이 매칭되었을 때만 추가 검증
-    const triggerFieldId = formConfig.무주택서약조건필드ID
-    const triggerValues = formConfig.무주택서약조건값들 || []
-    const housingTriggered = formConfig.무주택서약필요 === true && (
-      !triggerFieldId ? true : triggerValues.includes(values[triggerFieldId] || '')
-    )
+
     if (housingTriggered) {
       if (!housingRegion.trim()) { showError('주택구입(임차) 지역을 입력해주세요.'); return }
       if (!housingAddress.trim()) { showError('주소를 입력해주세요.'); return }
@@ -249,9 +258,6 @@ export default function ApplyPage() {
       const dur = diffYearsMonths(housingStart, housingEnd)
       if (!dur.valid) { showError('무주택(1주택) 기간이 올바르지 않습니다. 시작·종료 순서를 확인해주세요.'); return }
       if (!housingConsent) { showError('[서식3] 무주택·1주택 서약서에 동의해주세요.'); return }
-    } else if (hasHousing && !housingConsent && !triggerFieldId) {
-      // 조건 미설정인 폼: 서약서 항상 필수
-      showError('[서식3] 무주택·1주택 서약서에 동의해주세요.'); return
     }
     if (!privacyConsent) { showError('개인정보 수집 및 이용에 동의해주세요.'); return }
 
@@ -269,11 +275,16 @@ export default function ApplyPage() {
       }
     }
 
-    // 첨부파일 총 용량 검증 (필드별 합계가 32MB 이내)
+    // 첨부파일 용량 검증 (필드별 합계 및 개별 파일 32MB 이내)
     for (const f of formConfig.fields) {
       if (f.type !== 'file') continue
       const pending = fileValues[f.id] || []
       const existing = existingFiles[f.id] || []
+      const overSingle = pending.find(file => file.size > MAX_TOTAL_BYTES)
+      if (overSingle) {
+        showError(`'${overSingle.name}' 파일 크기가 32MB를 초과합니다.`)
+        return
+      }
       const total = pending.reduce((s, file) => s + file.size, 0)
         + existing.reduce((s, ef) => s + (ef.size || 0), 0)
       if (total > MAX_TOTAL_BYTES) {
@@ -287,18 +298,15 @@ export default function ApplyPage() {
       const appData: Record<string, unknown> = {}
       for (const f of formConfig.fields) {
         if (f.type === 'file') {
-          // 기존(편집 시 유지된) 파일 + 새로 추가된 파일을 모두 배열로 저장
           const uploaded: { url: string; name: string; size: number }[] = []
-          // 1) 기존 유지 파일
           for (const ef of (existingFiles[f.id] || [])) {
             uploaded.push({ url: ef.url, name: ef.name, size: ef.size ?? 0 })
           }
-          // 2) 신규 업로드
           const newFiles = fileValues[f.id] || []
           for (let idx = 0; idx < newFiles.length; idx++) {
             const file = newFiles[idx]
             const now = new Date()
-            const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`
+            const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
             const prefix = `${profile.employeeId}_${profile.name}_${profile.department}_${formConfig.제목}`
             const storedName = `${prefix}_${ts}_${idx + 1}_${file.name}`
             const path = `applications/${user.uid}/${storedName}`
@@ -324,9 +332,8 @@ export default function ApplyPage() {
           appData[f.label] = values[f.id] || ''
         }
       }
-      // 자동 동의 섹션도 신청 데이터에 기록
-      if (formConfig.대부동의필요) appData['대부규정 준수 동의'] = '동의함'
-      if (housingTriggered || (formConfig.무주택서약필요 && !formConfig.무주택서약조건필드ID)) {
+      if (hasLoan) appData['대부규정 준수 동의'] = '동의함'
+      if (housingTriggered) {
         appData['무주택·1주택 서약'] = '동의함'
         if (housingRegion.trim()) appData['주택구입(임차)지역'] = housingRegion.trim()
         if (housingAddress.trim()) appData['주택자금 주소'] = housingAddress.trim()
@@ -390,18 +397,9 @@ export default function ApplyPage() {
   if (!formConfig) return null
 
   const sections = getSections()
-  // section number after 신청자 정보(1) + N user sections
   let nextSecNum = sections.length + 2
-  const requireLoanFlag = formConfig.대부동의필요 === true
-  // 무주택서약(서식3): 조건이 설정되어 있으면 사용자의 선택값이 조건값에 포함될 때만 노출
-  const housingTriggerField = formConfig.무주택서약조건필드ID
-  const housingTriggerValues = formConfig.무주택서약조건값들 || []
-  const housingMatches = !housingTriggerField
-    ? true
-    : housingTriggerValues.includes(values[housingTriggerField] || '')
-  const requireHousingFlag = formConfig.무주택서약필요 === true && housingMatches
-  const loanNum = requireLoanFlag ? nextSecNum++ : null
-  const housingNum = requireHousingFlag ? nextSecNum++ : null
+  const loanNum = hasLoan ? nextSecNum++ : null
+  const housingNum = housingTriggered ? nextSecNum++ : null
   const privacyNum = nextSecNum
 
   const renderField = (field: FormField) => {
@@ -745,7 +743,6 @@ export default function ApplyPage() {
         return null
 
       default: {
-        // 금액성 필드는 number 타입이거나, 라벨에 '금액'/'amount' 포함된 경우 천원단위 콤마 + 원 단위
         const isMoney = field.type === 'number' && /금액|amount/i.test(field.label)
         if (isMoney) {
           return (
@@ -799,7 +796,7 @@ export default function ApplyPage() {
             <div style={secHdr}><CircNum n={1} /> 신청인 정보</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
               {([['성명', profile?.name], ['사번', profile?.employeeId], ['부서', profile?.department],
-                ['직급', profile?.position], ['입사일', profile?.hireDate], ['전화번호', profile?.phone]] as [string, string | undefined][]).map(([lbl, val]) => (
+              ['직급', profile?.position], ['입사일', profile?.hireDate], ['전화번호', profile?.phone]] as [string, string | undefined][]).map(([lbl, val]) => (
                 <div key={lbl}>
                   <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{lbl}</div>
                   <input readOnly value={val || '-'} style={{ width: '100%', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 6, padding: '8px 12px', fontSize: 14, color: '#374151', outline: 'none', boxSizing: 'border-box' }} />
@@ -808,57 +805,28 @@ export default function ApplyPage() {
             </div>
           </div>
 
-          {sections.map(([secTitle, fields], idx) => {
-            const isLoanSec = fields.every(f => f.type === 'loan_agreement')
-            const isHousingSec = fields.every(f => f.type === 'housing_agreement')
-            const isLastSec = idx === sections.length - 1
-            return (
-              <div key={secTitle} style={card}>
-                <div style={secHdr}><CircNum n={idx + 2} /> {secTitle}</div>
-                {isLoanSec ? (
-                  <>
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 16px', fontSize: 12, color: '#374151', lineHeight: 1.8, background: '#fafafa', maxHeight: 200, overflowY: 'auto', whiteSpace: 'pre-wrap', marginBottom: 12 }}>
-                      {LOAN_TEXT}
+          {sections.map(([secTitle, fields], idx) => (
+            <div key={secTitle} style={card}>
+              <div style={secHdr}><CircNum n={idx + 2} /> {secTitle}</div>
+              {idx === 0 && (formConfig.신청내용주석 || formConfig.한도설명) && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+                  {formConfig.신청내용주석 && (
+                    <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '10px 14px', fontSize: 12, color: '#92400e', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+                      💡 {formConfig.신청내용주석}
                     </div>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={loanConsent} onChange={e => setLoanConsent(e.target.checked)} style={{ width: 16, height: 16, accentColor: '#1a56db' }} />
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>위 [서식2] 대부규정 준수 및 이자비용 등 공제납부 동의서를 확인하였으며 이에 동의합니다. (필수)</span>
-                    </label>
-                  </>
-                ) : isHousingSec ? (
-                  <>
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 16px', fontSize: 12, color: '#374151', lineHeight: 1.8, background: '#fafafa', maxHeight: 200, overflowY: 'auto', whiteSpace: 'pre-wrap', marginBottom: 12 }}>
-                      {buildHousingText('   ', '   ')}
+                  )}
+                  {formConfig.한도설명 && (
+                    <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '8px 12px', fontSize: 12, color: '#1e40af', whiteSpace: 'pre-line' }}>
+                      ① {formConfig.한도설명}
                     </div>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={housingConsent} onChange={e => setHousingConsent(e.target.checked)} style={{ width: 16, height: 16, accentColor: '#1a56db' }} />
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>위 [서식3] 무주택·1주택 서약서를 확인하였으며 이에 서약합니다. (필수)</span>
-                    </label>
-                  </>
-                ) : (
-                  <>
-                    {idx === 0 && (formConfig.신청내용주석 || formConfig.한도설명) && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
-                        {formConfig.신청내용주석 && (
-                          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '10px 14px', fontSize: 12, color: '#92400e', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-                            💡 {formConfig.신청내용주석}
-                          </div>
-                        )}
-                        {formConfig.한도설명 && (
-                          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '8px 12px', fontSize: 12, color: '#1e40af', whiteSpace: 'pre-line' }}>
-                            ① {formConfig.한도설명}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {fields.map(f => renderField(f))}
-                  </>
-                )}
-              </div>
-            )
-          })}
+                  )}
+                </div>
+              )}
+              {fields.map(f => renderField(f))}
+            </div>
+          ))}
 
-          {requireLoanFlag && loanNum !== null && (
+          {hasLoan && loanNum !== null && (
             <div style={card}>
               <div style={secHdr}><CircNum n={loanNum} /> 대부규정 준수 및 이자비용 등 공제납부 동의</div>
               <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 16px', fontSize: 12, color: '#374151', lineHeight: 1.8, background: '#fafafa', maxHeight: 240, overflowY: 'auto', whiteSpace: 'pre-wrap', marginBottom: 12 }}>
@@ -871,7 +839,7 @@ export default function ApplyPage() {
             </div>
           )}
 
-          {requireHousingFlag && housingNum !== null && (() => {
+          {housingTriggered && housingNum !== null && (() => {
             const dur = diffYearsMonths(housingStart, housingEnd)
             const housingText = buildHousingText(dur.valid ? dur.years : '   ', dur.valid ? dur.months : '   ')
             const inputBox: React.CSSProperties = { width: '100%', border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 12px', fontSize: 14, outline: 'none', boxSizing: 'border-box' }
@@ -954,7 +922,7 @@ export default function ApplyPage() {
           )}
 
           <div style={{ display: 'flex', gap: 12 }}>
-            <button type="submit" disabled={submitting} style={{ ...btnPrimary, flex: 1, padding: '14px', fontSize: 15 }}>
+            <button type="submit" disabled={submitting || editLocked} style={{ ...btnPrimary, flex: 1, padding: '14px', fontSize: 15, opacity: (submitting || editLocked) ? 0.5 : 1 }}>
               {submitting ? (editId ? '수정 중...' : '제출 중...') : (editId ? '✏️ 수정 완료' : '✈ 신청서 제출')}
             </button>
             <button type="button" onClick={() => router.push('/main')} style={btnSecondary}>

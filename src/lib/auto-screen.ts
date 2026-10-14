@@ -1,11 +1,8 @@
 /**
- * 자동 사전심사 룰 엔진
+ * 자동 사전심사 룰 엔진 (무과금 결정론적 룰 엔진)
  *
  * 신청서가 들어오면 룰 기반으로 검토하여 통과/경고/차단 플래그를 반환.
  * 외부 API 호출 없이 결정론적 룰만 사용 — 비용 0원.
- *
- * 입력: 신청 1건 + 컨텍스트 (폼 설정, 사용자 정보, 같은 사용자의 다른 신청)
- * 출력: { level: 'pass' | 'warn' | 'block', flags: ScreenFlag[] }
  */
 
 export type ScreenLevel = 'pass' | 'warn' | 'block'
@@ -66,6 +63,8 @@ interface ScreenBudgetGroup {
 
 export interface ScreenContext {
   form: ScreenFormConfig | null
+  /** (선택) 전체 양식 맵 — 제공 시 예산 그룹 내 타 양식 금액을 더 정확히 추출 */
+  formsMap?: Record<string, ScreenFormConfig>
   user: ScreenUser | null
   /** 같은 신청자의 모든 신청 (현재 신청 포함) */
   userApps: ScreenApp[]
@@ -82,36 +81,72 @@ const ROW_TYPES = new Set([
   'vaccination_records',
 ])
 
+/** Date 객체를 한국 시간(KST, UTC+9) 기준 'YYYY-MM-DD' 문자열로 변환 */
+function toKstYmd(date: Date): string {
+  const kstTime = date.getTime() + 9 * 60 * 60 * 1000
+  return new Date(kstTime).toISOString().slice(0, 10)
+}
+
+/** Date 객체를 한국 시간(KST) 기준 연도/월 정보로 변환 */
+function toKstYearMonth(date: Date): { year: number; ym: string } {
+  const ymd = toKstYmd(date)
+  return {
+    year: parseInt(ymd.slice(0, 4), 10),
+    ym: ymd.slice(0, 7),
+  }
+}
+
 /** 신청 데이터에서 합계 금액 추출 (테이블형 필드의 금액 합계 또는 amount 필드) */
 function extractAmount(data: Record<string, unknown> | undefined, form: ScreenFormConfig | null): number {
   if (!data) return 0
   let sum = 0
-  // 합계 키들 우선
-  const totalKeys = ['총금액', '장학금총액', '생활복지총액', '문화활동총액', '예방접종총액']
+
+  // 1순위: 명시적 합계 키들 우선 탐색
+  const totalKeys = ['총금액', '장학금총액', '생활복지총액', '문화활동총액', '예방접종총액', '신청금액', '지원금액']
   for (const k of totalKeys) {
     const v = data[k]
     if (typeof v === 'number') sum = Math.max(sum, v)
     else if (typeof v === 'string') {
-      const n = parseInt(v.replace(/[^\d]/g, ''))
+      const n = parseInt(v.replace(/[^\d]/g, ''), 10)
       if (!isNaN(n)) sum = Math.max(sum, n)
     }
   }
   if (sum > 0) return sum
-  // 일반 amount 필드
+
+  // 2순위: form 정의가 있을 경우 amount/number 필드 탐색
   if (form?.fields) {
     for (const f of form.fields) {
       if (f.type === 'amount' || f.type === 'number') {
-        if (!/금액|amount/i.test(f.label) && !/금액|amount/i.test(f.id)) continue
-        const v = data[f.label]
+        if (!/금액|amount|비용|총액/i.test(f.label) && !/금액|amount/i.test(f.id)) continue
+        const v = data[f.label] ?? data[f.id]
         if (typeof v === 'number') return v
         if (typeof v === 'string') {
-          const n = parseInt(v.replace(/[^\d]/g, ''))
+          const n = parseInt(v.replace(/[^\d]/g, ''), 10)
           if (!isNaN(n)) return n
         }
       }
     }
   }
-  return 0
+
+  // 3순위: 타 양식(form 불일치)이거나 폼 정의가 없을 때 data 키 자체에서 금액/배열 추론
+  for (const [k, v] of Object.entries(data)) {
+    if (Array.isArray(v)) {
+      const rowSum = v.reduce((acc, r) => {
+        if (r && typeof r === 'object') {
+          const amt = (r as Record<string, unknown>).금액
+          const n = typeof amt === 'number' ? amt : typeof amt === 'string' ? parseInt(amt.replace(/[^\d]/g, ''), 10) : 0
+          return acc + (isNaN(n) ? 0 : n)
+        }
+        return acc
+      }, 0)
+      if (rowSum > 0) sum = Math.max(sum, rowSum)
+    } else if (/금액|총액|비용|amount/i.test(k)) {
+      const n = typeof v === 'number' ? v : typeof v === 'string' ? parseInt(v.replace(/[^\d]/g, ''), 10) : 0
+      if (!isNaN(n) && n > 0) sum = Math.max(sum, n)
+    }
+  }
+
+  return sum
 }
 
 /** 행 단위 테이블 필드의 row 합 vs 데이터에 저장된 합계 비교 */
@@ -124,12 +159,11 @@ function checkRowSumMismatch(data: Record<string, unknown> | undefined, form: Sc
     const rowSum = rows.reduce((s, r) => {
       if (r && typeof r === 'object') {
         const v = (r as Record<string, unknown>).금액
-        const n = typeof v === 'number' ? v : (typeof v === 'string' ? parseInt(v.replace(/[^\d]/g, '')) : 0)
+        const n = typeof v === 'number' ? v : (typeof v === 'string' ? parseInt(v.replace(/[^\d]/g, ''), 10) : 0)
         return s + (isNaN(n) ? 0 : n)
       }
       return s
     }, 0)
-    // 같은 폼에 저장된 총합 확인
     const totalKeys: Record<string, string> = {
       medical_records: '총금액',
       scholarship_records: '장학금총액',
@@ -140,7 +174,7 @@ function checkRowSumMismatch(data: Record<string, unknown> | undefined, form: Sc
     const tk = totalKeys[f.type]
     if (tk) {
       const stored = data[tk]
-      const storedNum = typeof stored === 'number' ? stored : (typeof stored === 'string' ? parseInt(String(stored).replace(/[^\d]/g, '')) : NaN)
+      const storedNum = typeof stored === 'number' ? stored : (typeof stored === 'string' ? parseInt(String(stored).replace(/[^\d]/g, ''), 10) : NaN)
       if (!isNaN(storedNum) && storedNum !== rowSum) {
         return {
           level: 'warn',
@@ -159,19 +193,14 @@ function normalize(s: string): string {
   return s.normalize('NFC').replace(/\s+/g, '').toLowerCase()
 }
 
-/** 신청 데이터에서 필드 값을 찾는다.
- *  1) label 직접 매칭 → 2) 정규화 매칭 → 3) id 매칭 (혹시 옛 데이터)
- *  match 우선순위로 첫 hit 반환. 못 찾으면 undefined.
- */
+/** 신청 데이터에서 필드 값을 찾는다. */
 function findFieldValue(data: Record<string, unknown> | undefined, f: ScreenFormField): unknown {
   if (!data) return undefined
   if (f.label in data) return data[f.label]
   const dataKeys = Object.keys(data)
   const nLabel = normalize(f.label)
-  // 정규화 비교
   const fuzzyKey = dataKeys.find(k => normalize(k) === nLabel)
   if (fuzzyKey) return data[fuzzyKey]
-  // ID 매칭 (구버전 호환)
   if (f.id in data) return data[f.id]
   return undefined
 }
@@ -185,7 +214,6 @@ function isEmpty(v: unknown): boolean {
     return v.every(r => {
       if (r === null || r === undefined) return true
       if (typeof r !== 'object') return !r
-      // 행 객체: 모든 값이 빈 문자열이거나 nullish 일 때만 빈 행
       const vals = Object.values(r as Record<string, unknown>)
       return vals.every(x => x === undefined || x === null || (typeof x === 'string' && x.trim() === ''))
     })
@@ -194,9 +222,7 @@ function isEmpty(v: unknown): boolean {
   return false
 }
 
-/** 필수 필드 누락 검사 — 결과는 warn 레벨 (라벨 변경/필드 추가 등 구조적 이슈 가능성)
- *  단, 신청 데이터 자체가 완전히 비어있는 경우만 block
- */
+/** 필수 필드 누락 검사 */
 function checkRequired(app: ScreenApp, form: ScreenFormConfig): ScreenFlag | null {
   if (!form.fields) return null
   const dataEmpty = !app.data || Object.keys(app.data).length === 0
@@ -211,13 +237,11 @@ function checkRequired(app: ScreenApp, form: ScreenFormConfig): ScreenFlag | nul
   const missing: string[] = []
   for (const f of form.fields) {
     if (!f.required) continue
-    // 시스템 자동 처리 필드는 검사 제외
     if (f.type === 'loan_agreement' || f.type === 'housing_agreement') continue
     const v = findFieldValue(app.data, f)
     if (isEmpty(v)) missing.push(f.label)
   }
   if (missing.length === 0) return null
-  // 보수적 판정: 차단이 아닌 경고로 노출 (라벨 변경/늦게 추가된 필수 등 가능성)
   return {
     level: 'warn',
     code: 'MISSING_REQUIRED',
@@ -226,24 +250,24 @@ function checkRequired(app: ScreenApp, form: ScreenFormConfig): ScreenFlag | nul
   }
 }
 
-/** 신청기간 검사 — 신청일이 폼의 어떤 신청기간에도 포함되지 않으면 경고 */
+/** 신청기간 검사 — KST 기준으로 날짜 비교 */
 function checkPeriod(app: ScreenApp, form: ScreenFormConfig): ScreenFlag | null {
   const periods = form.periods || []
   if (periods.length === 0) return null
   const created = app.created_at?.toDate?.()
   if (!created) return null
-  const ymd = created.toISOString().slice(0, 10)
+  const ymd = toKstYmd(created)
   const inAny = periods.some(p => p.start && p.end && ymd >= p.start && ymd <= p.end)
   if (inAny) return null
   return {
     level: 'warn',
     code: 'OUT_OF_PERIOD',
     label: '신청기간 외 접수',
-    detail: `신청일 ${ymd} — 정기 신청기간(${periods.map(p => `${p.start}~${p.end}`).join(', ')}) 밖`,
+    detail: `신청일 ${ymd}(KST) — 정기 신청기간(${periods.map(p => `${p.start}~${p.end}`).join(', ')}) 밖`,
   }
 }
 
-/** 휴직자 대부 — 현재 휴직 상태일 때 경고 (신청 시점에는 휴직이 아니었을 수 있음) */
+/** 휴직자 대부 — 현재 휴직 상태일 때 경고 */
 function checkLeaveLoan(form: ScreenFormConfig, user: ScreenUser | null): ScreenFlag | null {
   if (!form.대부동의필요) return null
   if (user?.status !== 'leave') return null
@@ -266,7 +290,6 @@ function checkHousingOath(app: ScreenApp, form: ScreenFormConfig): ScreenFlag | 
   const userValue = findFieldValue(app.data, tField)
   if (typeof userValue !== 'string') return null
   if (tv.length > 0 && !tv.includes(userValue)) return null
-  // 조건이 매칭되었는데 서약값이 누락
   const data = app.data || {}
   const oathKeys = Object.keys(data).filter(k => /무주택|1주택|서약/.test(k))
   if (oathKeys.some(k => !!data[k])) return null
@@ -278,17 +301,21 @@ function checkHousingOath(app: ScreenApp, form: ScreenFormConfig): ScreenFlag | 
   }
 }
 
-/** 같은 사용자의 같은 폼에 대한 중복(연도 단위) 신청 */
+/** 같은 사용자의 같은 폼에 대한 중복(연도 단위) 신청 — KST 연도 기준 */
 function checkDuplicate(app: ScreenApp, ctx: ScreenContext): ScreenFlag | null {
   const created = app.created_at?.toDate?.()
-  const year = created?.getFullYear()
-  if (!year) return null
-  const others = ctx.userApps.filter(a =>
-    a.id !== app.id &&
-    a.form_id === app.form_id &&
-    (a.status === 'pending' || a.status === 'approved') &&
-    a.created_at?.toDate?.()?.getFullYear() === year,
-  )
+  if (!created) return null
+  const { year } = toKstYearMonth(created)
+  const others = ctx.userApps.filter(a => {
+    const ad = a.created_at?.toDate?.()
+    return (
+      a.id !== app.id &&
+      a.form_id === app.form_id &&
+      (a.status === 'pending' || a.status === 'approved') &&
+      ad &&
+      toKstYearMonth(ad).year === year
+    )
+  })
   if (others.length === 0) return null
   return {
     level: 'warn',
@@ -300,9 +327,7 @@ function checkDuplicate(app: ScreenApp, ctx: ScreenContext): ScreenFlag | null {
 
 /** 0원 신청 의심 */
 function checkZeroAmount(app: ScreenApp, form: ScreenFormConfig): ScreenFlag | null {
-  // 대부 신청은 0원 정상 가능 (생활안정 등) → 스킵
   if (form.대부동의필요) return null
-  // 행 단위 필드가 있을 경우만 의미가 있음
   const hasRows = form.fields?.some(f => ROW_TYPES.has(f.type))
   if (!hasRows) return null
   const amount = extractAmount(app.data, form)
@@ -315,16 +340,20 @@ function checkZeroAmount(app: ScreenApp, form: ScreenFormConfig): ScreenFlag | n
   }
 }
 
-/** 예산 그룹 한도 초과 */
+/** 예산 그룹 한도 초과 — KST 기간 적용 및 타 양식 금액 추출 보완 */
 function checkBudgetExceeded(app: ScreenApp, ctx: ScreenContext): ScreenFlag | null {
   const group = ctx.budgetGroups.find(g => g.formIds.includes(app.form_id))
   if (!group || !group.limitAmount) return null
   const created = app.created_at?.toDate?.()
   if (!created) return null
   const isAnnual = group.period === 'annual'
-  const sameUser = ctx.userApps.filter(a => a.user_id === app.user_id || (a.applicant?.사번 && a.applicant?.사번 === app.applicant?.사번))
-  // 그룹 내 폼들에 대해 같은 기간 승인 합산
-  const periodOf = (d: Date) => isAnnual ? d.getFullYear().toString() : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  const sameUser = ctx.userApps.filter(
+    a => a.user_id === app.user_id || (a.applicant?.사번 && a.applicant?.사번 === app.applicant?.사번)
+  )
+  const periodOf = (d: Date) => {
+    const { year, ym } = toKstYearMonth(d)
+    return isAnnual ? String(year) : ym
+  }
   const thisPeriod = periodOf(created)
   let approvedSum = 0
   for (const a of sameUser) {
@@ -334,7 +363,8 @@ function checkBudgetExceeded(app: ScreenApp, ctx: ScreenContext): ScreenFlag | n
     const ad = a.created_at?.toDate?.()
     if (!ad) continue
     if (periodOf(ad) !== thisPeriod) continue
-    approvedSum += extractAmount(a.data, ctx.form)
+    const targetForm = ctx.formsMap?.[a.form_id] ?? (a.form_id === ctx.form?.id ? ctx.form : null)
+    approvedSum += extractAmount(a.data, targetForm)
   }
   const thisAmount = extractAmount(app.data, ctx.form)
   const total = approvedSum + thisAmount
@@ -352,7 +382,6 @@ export function screen(app: ScreenApp, ctx: ScreenContext): ScreenResult {
   if (!ctx.form) {
     return { level: 'warn', flags: [{ level: 'warn', code: 'NO_FORM', label: '신청서 정의를 찾을 수 없음' }] }
   }
-  // 룰 실행 (블록 룰 우선)
   const checks = [
     () => checkRequired(app, ctx.form!),
     () => checkLeaveLoan(ctx.form!, ctx.user),
@@ -371,7 +400,6 @@ export function screen(app: ScreenApp, ctx: ScreenContext): ScreenResult {
       /* 룰 자체 오류는 무시하고 다음 룰 진행 */
     }
   }
-  // 종합 판정
   let level: ScreenLevel = 'pass'
   if (flags.some(f => f.level === 'block')) level = 'block'
   else if (flags.some(f => f.level === 'warn')) level = 'warn'

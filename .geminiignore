@@ -1,0 +1,11 @@
+node_modules/
+.next/
+out/
+functions/node_modules/
+functions/lib/
+package-lock.json
+functions/package-lock.json
+public/spline-robot.html
+public/*.jpg
+public/*.ico
+docs/*_PPT.html
